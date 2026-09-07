@@ -224,7 +224,7 @@ Alpha. It works, it is tested, and it is honest about what it has not proven.
 | Area | Status |
 |---|---|
 | Prometheus exposition parsing (labels, histograms, counters) | Implemented, tested against fixtures and edge cases |
-| vLLM adapter | Implemented against vLLM's V1 metric definitions; **not yet run against a live vLLM server** |
+| vLLM adapter | Implemented and validated against live vLLM 0.28.0 on the ARM64 CPU backend (`facebook/opt-125m`), with captured idle, loaded and capacity-queued states; **GPU-backed vLLM not yet validated** |
 | Triton adapter | Implemented from the documented metric surface; **not yet run against a live Triton server** |
 | DCGM adapter | Implemented and unit-tested; **not yet run against real hardware** |
 | Rule engine | Implemented, tested at boundaries, exercised end to end by the demo |
@@ -232,7 +232,7 @@ Alpha. It works, it is tested, and it is honest about what it has not proven.
 | TimescaleDB history | Implemented, bounded and non-blocking; **no integration test** |
 | HTTP API | Implemented and tested |
 
-The gap that matters most is the last mile: everything is validated against fixtures built from the runtimes' own metric definitions, not against live servers. If you run vLLM and are willing to point `ifa check` at it, that report is the single most useful contribution right now. [docs/ROADMAP.md](docs/ROADMAP.md) is explicit about what "validated" would mean.
+Live validation now covers vLLM 0.28.0 on the ARM64 CPU backend using `facebook/opt-125m`, including captured idle, loaded and capacity-queued states. The remaining runtime-validation gaps are GPU-backed vLLM, a live Triton server and DCGM on real GPU hardware. [docs/ROADMAP.md](docs/ROADMAP.md) tracks the remaining integration work.
 
 ## Known limitations
 

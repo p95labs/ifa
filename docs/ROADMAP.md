@@ -19,7 +19,7 @@ on this page.
 |---|---|
 | Prometheus exposition parsing — labels, histograms, summaries, edge cases | Locally validated |
 | Rule engine — 19 rules, suppression, sustained conditions | Locally validated |
-| vLLM adapter | Implemented |
+| vLLM adapter | Live-server validated — CPU backend, vLLM 0.28.0, `facebook/opt-125m`; GPU-backed vLLM not yet validated |
 | Triton adapter | Implemented |
 | DCGM adapter | Implemented |
 | HTTP API, `/api/v1` and legacy paths | Implemented |
@@ -35,24 +35,29 @@ on this page.
 real socket against vLLM-shaped exposition, and each simulated failure mode
 produces its intended diagnosis.
 
-Nothing is integration validated. That is the honest state of the project.
+The vLLM adapter has been validated against a live CPU-backed server (see below). Full Kubernetes integration validation remains open.
 
 ## Next, in order
 
-### 1. Validate against a live vLLM server
+### Done: live vLLM validation (CPU backend)
 
-The highest-value thing that could happen to this project, and it is not code.
-Every metric name, label and bucket boundary comes from vLLM's own source, and
-the fixtures are built from those definitions — but a fixture built from a spec
-and a real payload are not the same artifact, and the first version of this
-adapter is proof: it passed its tests and could not read a real server.
+The vLLM adapter has been run against a real server:
 
-What would close it: `ifa check` output from a real vLLM deployment, plus the
-version. Ten seconds of someone's time. If you run vLLM, [open an
-issue](https://github.com/pm32900/inference-fabric-autopilot/issues) with the
-output.
+- vLLM 0.28.0, official ARM64 CPU Docker image
+- Model: `facebook/opt-125m`
+- `ifa check` parsed the live `/metrics` endpoint; all required metrics were
+  present, zero unparseable lines
+- Fixtures captured in three states: idle, loaded, and capacity-queued
+- The capacity-queued state was produced with `--max-num-seqs 2`; the capture
+  shows non-zero `num_requests_waiting` and
+  `num_requests_waiting_by_reason{reason="capacity"}`
+- `TestCapturedPayload` passes against the captured fixture
 
-### 2. A kind-based integration test in CI
+This validates the vLLM adapter against a real CPU-backed server only. GPU-backed
+vLLM, real DCGM hardware, live Triton, and the Kubernetes discovery → scrape →
+recommendation path all remain unvalidated.
+
+### 1. A kind-based integration test in CI
 
 Install the chart into a kind cluster, run a small CPU-mode vLLM, assert that
 IFA discovers it, scrapes it, and produces findings. This is what would move
@@ -60,7 +65,7 @@ Kubernetes discovery and the chart from "implemented" to "integration
 validated", and it would catch the class of bug — an RBAC rule that is one verb
 short, a Service port that does not match — that unit tests structurally cannot.
 
-### 3. Per-pod GPU attribution
+### 2. Per-pod GPU attribution
 
 A DCGM Exporter endpoint reports the GPUs on a *node*, not the GPUs belonging to
 one pod. On a node running several inference workloads, the utilisation IFA
@@ -71,7 +76,7 @@ that the informer cache already has.
 Until this lands, GPU findings are trustworthy on dedicated GPU nodes and
 approximate on shared ones. The docs say so; the API does not yet.
 
-### 4. Per-workload thresholds
+### 3. Per-workload thresholds
 
 Thresholds are global. A batch scoring pipeline and an interactive chat endpoint
 have genuinely different definitions of "slow", and sharing one set means either
@@ -79,7 +84,7 @@ the batch workload is permanently on fire or the chat endpoint's real problems
 are under the line. A per-target override block, falling back to the global set,
 is the obvious shape.
 
-### 5. A finding lifecycle
+### 4. A finding lifecycle
 
 Findings are stateless: each request re-evaluates from scratch. IDs are stable
 while a condition holds, which is enough to deduplicate, but there is no
@@ -109,6 +114,7 @@ from someone who runs them and can check the output.
 
 ## Toward v1.0
 
-Not close. It would need, at minimum: integration validation against real vLLM
-and a real cluster; authentication on the API; per-workload thresholds; signed
-images and an SBOM; and a stable API used by somebody other than the author.
+Not close. It would need, at minimum: integration validation against GPU-backed
+vLLM and a real cluster; authentication on the API; per-workload thresholds;
+signed images and an SBOM; and a stable API used by somebody other than the
+author.
