@@ -7,15 +7,13 @@ adapter has actually been validated.
 
 | Adapter | Implemented against | Tested against | Run against a live server |
 |---|---|---|---|
-| vLLM | `vllm/v1/metrics/loggers.py` (metric names, types, labels, histogram bucket boundaries) | Fixtures built from those definitions, including a V0-era payload and a two-model payload | **No** |
+| vLLM | `vllm/v1/metrics/loggers.py` (metric names, types, labels, histogram bucket boundaries) | Fixtures built from those definitions, including a V0-era payload and a two-model payload; plus three verbatim live captures (idle, loaded, capacity-queued) from vLLM 0.28.0 | **Yes** — vLLM 0.28.0, ARM64 CPU backend, `facebook/opt-125m`; GPU-backed vLLM not yet validated |
 | Triton | The published metrics documentation | Fixtures for the default and summary-latency configurations | **No** |
 | DCGM Exporter | Published field IDs | Fixtures including multi-GPU and partial payloads | **No** |
 
-That last column is the honest gap. Everything is checked against payloads
-constructed from each runtime's own definitions, which catches the class of bug
-that killed the first version of this adapter — but it is not the same as pointing
-it at a real server. If you run any of these, `ifa check <url>` produces the
-report that would close it, and it takes about ten seconds.
+The vLLM adapter has been validated against a live CPU-backed server; Triton and
+DCGM have not. If you run either, `ifa check <url>` produces the report that
+would close it.
 
 ---
 
@@ -82,6 +80,59 @@ signal.
 - **`engine` label.** V1 runs several engine cores. IFA sums request counts
   across them and takes the maximum of utilisation gauges, because summing a
   percentage across engines is meaningless.
+
+### Live validation
+
+The adapter was run against a real vLLM server with the following configuration:
+
+- **Image:** `vllm/vllm-openai-cpu:latest-arm64`
+  (`sha256:dbc1b4da66bbc0cb3a3f6859cd9046833f9540d34322b192625868f888e8e094`)
+- **Version:** 0.28.0
+- **Backend:** CPU, Linux ARM64 Docker VM
+- **Model:** `facebook/opt-125m`
+- **Baseline flags:** `--dtype=bfloat16 --gpu-memory-utilization 0.4`
+- **Capacity-queued run also used:** `--max-num-seqs 2`
+
+`ifa check` against the live `/metrics` endpoint reported 122 metric families,
+0 unparseable lines, and all 13 required metrics present:
+
+```
+vllm:num_requests_running       found
+vllm:num_requests_waiting       found
+vllm:kv_cache_usage_perc        found
+vllm:time_to_first_token_seconds found
+vllm:e2e_request_latency_seconds found
+vllm:generation_tokens_total    found
+vllm:prompt_tokens_total        found
+vllm:request_success_total      found
+vllm:num_preemptions_total      found
+vllm:request_queue_time_seconds found
+vllm:prefix_cache_queries_total found
+vllm:prefix_cache_hits_total    found
+vllm:num_requests_waiting_by_reason found
+```
+
+Three verbatim `/metrics` payloads were captured:
+
+| Fixture | State | Key observed values |
+|---|---|---|
+| `testdata/vllm_v1_captured.txt` | Post-traffic idle | requests_running=0, requests_waiting=0, TTFT p95≈39.9 ms |
+| `testdata/vllm_v1_under_load.txt` | Active loaded | requests_running=10, requests_waiting=0, raw `kv_cache_usage_perc`≈0.02857 |
+| `testdata/vllm_v1_queued.txt` | Capacity-queued (`--max-num-seqs 2`) | requests_waiting=12, `num_requests_waiting_by_reason{reason="capacity"}`=12, `reason="deferred"`=0, raw `kv_cache_usage_perc`≈0.00462 |
+
+**KV-cache unit.** vLLM exposes `kv_cache_usage_perc` as a fraction where `1`
+means 100% usage. The adapter multiplies by 100 before storing. The live values
+above were low (under 3%), so high-KV-cache pressure was not exercised.
+
+**What this validation does not establish:**
+
+- GPU-backed vLLM behavior
+- Real device-side GPU KV-cache behavior
+- Live V0 `gpu_cache_usage_perc` behavior
+- Preemption behavior — `vllm:num_preemptions_total` was present but preemption was not deliberately triggered
+- DCGM on real GPU hardware
+- Live Triton behavior
+- Full Kubernetes discovery → scrape → recommendation integration
 
 ### Requirements
 

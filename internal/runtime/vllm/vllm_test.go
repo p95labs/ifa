@@ -4,6 +4,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/pm32900/inference-fabric-autopilot/internal/runtime"
@@ -251,6 +252,87 @@ vllm:num_requests_running{model_name="m"} 5
 	if r.UnparseableLines == 0 {
 		t.Error("malformed lines were not counted; a format change would be invisible")
 	}
+}
+
+// TestCapturedPayload runs the adapter against three verbatim /metrics payloads
+// captured from a real vLLM 0.28.0 server (ARM64 CPU backend, facebook/opt-125m).
+// The fixtures are intended to be repository testdata; a missing file causes the test to fail.
+func TestCapturedPayload(t *testing.T) {
+	const capturedModel = "facebook/opt-125m"
+
+	cases := []struct {
+		name        string
+		fixture     string
+		wantRunning float64
+		wantWaiting float64
+		wantKV      float64
+	}{
+		{
+			name:        "idle",
+			fixture:     "vllm_v1_captured.txt",
+			wantRunning: 0,
+			wantWaiting: 0,
+			wantKV:      0,
+		},
+		{
+			name:        "loaded",
+			fixture:     "vllm_v1_under_load.txt",
+			wantRunning: 10,
+			wantWaiting: 0,
+			wantKV:      2.857142857142858,
+		},
+		{
+			name:        "capacity-queued",
+			fixture:     "vllm_v1_queued.txt",
+			wantRunning: 2,
+			wantWaiting: 12,
+			wantKV:      0.4618937644341847,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := fixture(t, tc.fixture)
+
+			// Sanity-check that the fixture contains the expected model label
+			// before parsing; a wrong label produces all-unmeasured fields.
+			if got := firstModelName(body); got != capturedModel {
+				t.Fatalf("fixture model_name = %q, want %q", got, capturedModel)
+			}
+
+			r, err := New().Parse(body, capturedModel)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+
+			if len(r.Missing) > 0 {
+				t.Errorf("required metrics absent from real capture — adapter may need updating: %v", r.Missing)
+			}
+			if r.UnparseableLines > 0 {
+				t.Errorf("%d unparseable line(s); exposition format may have changed", r.UnparseableLines)
+			}
+
+			closeTo(t, "requests_running", r.Snapshot.RequestsRunning, tc.wantRunning)
+			closeTo(t, "requests_waiting", r.Snapshot.RequestsWaiting, tc.wantWaiting)
+			closeTo(t, "kv_cache_usage_percent", r.Snapshot.KVCacheUsagePct, tc.wantKV)
+		})
+	}
+}
+
+// firstModelName returns the first model_name label value found in a vLLM
+// Prometheus exposition payload. TestCapturedPayload uses it to verify that
+// each captured fixture came from the expected model.
+func firstModelName(body string) string {
+	const key = `model_name="`
+	for _, line := range strings.Split(body, "\n") {
+		if i := strings.Index(line, key); i >= 0 {
+			rest := line[i+len(key):]
+			if j := strings.IndexByte(rest, '"'); j >= 0 {
+				return rest[:j]
+			}
+		}
+	}
+	return ""
 }
 
 func BenchmarkParseV1(b *testing.B) {
