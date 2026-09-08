@@ -164,6 +164,54 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y shellcheck
       - run: shellcheck scripts/*.sh
 
+  kind-integration:
+    name: Kind integration test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      # Build the IFA image and make it available to the local Docker daemon so
+      # that `kind load docker-image` can pull it out of the daemon cache.
+      - name: Build IFA image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          push: false
+          load: true
+          tags: ifa:integration-test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Install kind
+        run: |
+          curl -sSLo /usr/local/bin/kind \
+            "https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64"
+          chmod +x /usr/local/bin/kind
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.16.3
+
+      - name: Run integration test
+        run: bash scripts/kind-integration.sh
+
+      # Both failure steps are guarded so they only add noise when something
+      # actually went wrong; on success the job completes cleanly.
+      - name: IFA pod logs on failure
+        if: failure()
+        run: |
+          kubectl logs --namespace autopilot \
+            -l app.kubernetes.io/name=autopilot --tail=100 2>/dev/null || true
+
+      - name: Cluster state on failure
+        if: failure()
+        run: |
+          kubectl get all --all-namespaces 2>/dev/null || true
+          kubectl describe pods --all-namespaces 2>/dev/null || true
+
   vulncheck:
     name: Vulnerability scan
     runs-on: ubuntu-latest
