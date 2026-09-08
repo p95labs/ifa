@@ -1,4 +1,4 @@
-# Inference Fabric Autopilot — control plane configuration.
+# IFA — control plane configuration.
 #
 # This file ships with no scrape targets: IFA does nothing until it is told what
 # to watch. To see it working without editing anything, run the control plane

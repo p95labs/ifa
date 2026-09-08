@@ -3,7 +3,7 @@
 ## Helm
 
 ```bash
-helm install autopilot deploy/helm/autopilot \
+helm install ifa deploy/helm/ifa \
   --namespace inference --create-namespace \
   --set image.tag=v0.2.0 \
   --values my-values.yaml
@@ -60,7 +60,7 @@ for a few seconds costs you a few seconds of diagnostics.
 ### Without Helm
 
 ```bash
-helm template autopilot deploy/helm/autopilot -f my-values.yaml > ifa.yaml
+helm template ifa deploy/helm/ifa -f my-values.yaml > ifa.yaml
 kubectl apply -f ifa.yaml
 ```
 
@@ -95,8 +95,8 @@ from a working policy when viewed through `kubectl`. Verify with a connectivity
 test, then verify IFA is still scraping:
 
 ```bash
-kubectl -n inference exec deploy/autopilot -- true 2>/dev/null || \
-  kubectl -n inference port-forward svc/autopilot 8080:8080 &
+kubectl -n inference exec deploy/ifa -- true 2>/dev/null || \
+  kubectl -n inference port-forward svc/ifa 8080:8080 &
 curl -s localhost:8080/metrics | grep ifa_scrape_errors_total
 ```
 
@@ -116,7 +116,7 @@ image and the chart.
 produces, in `dist/`:
 
 - `ifa-image-v0.2.0.tar` — `docker save` output
-- `autopilot-0.2.0.tgz` — the packaged chart
+- `ifa-0.2.0.tgz` — the packaged chart
 - `SHA256SUMS`
 
 On the target:
@@ -126,10 +126,10 @@ docker load -i ifa-image-v0.2.0.tar
 # or, for containerd:  ctr -n k8s.io images import ifa-image-v0.2.0.tar
 
 # Push to an internal registry, then:
-helm install autopilot autopilot-0.2.0.tgz \
+helm install ifa ifa-0.2.0.tgz \
   --namespace inference --create-namespace \
   --set image.registry=registry.internal.example.com \
-  --set image.repository=inference-fabric-autopilot \
+  --set image.repository=ghcr.io/p95labs/ifa \
   --set image.tag=v0.2.0 \
   --values my-values.yaml
 ```
@@ -172,8 +172,8 @@ silently not writing it is worse than a clear failure.
 ## Verifying an install
 
 ```bash
-kubectl -n inference get pods -l app.kubernetes.io/name=autopilot
-kubectl -n inference port-forward svc/autopilot 8080:8080
+kubectl -n inference get pods -l app.kubernetes.io/name=ifa
+kubectl -n inference port-forward svc/ifa 8080:8080
 
 curl -s localhost:8080/api/v1/healthz | jq .config
 curl -s localhost:8080/api/v1/telemetry | jq '.count'

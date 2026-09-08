@@ -2,7 +2,7 @@
 
 Reach the API:
 
-  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "autopilot.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "ifa.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
   curl -s localhost:{{ .Values.service.port }}/api/v1/recommendations | jq .
 
 {{- if not .Values.config.collector.targets }}

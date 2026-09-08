@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/pm32900/inference-fabric-autopilot/internal/telemetry"
+	"github.com/p95labs/ifa/internal/telemetry"
 )
 
 // Sink batches snapshots onto a bounded queue and writes them from a single

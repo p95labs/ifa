@@ -132,7 +132,7 @@ func NewWatcher(opts Options) (*Watcher, error) {
 	// server is under pressure.
 	cfg.QPS = 10
 	cfg.Burst = 20
-	cfg.UserAgent = "inference-fabric-autopilot"
+	cfg.UserAgent = "ifa"
 
 	client, err := kubernetes.NewForConfig(cfg)
 	if err != nil {

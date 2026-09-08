@@ -18,10 +18,10 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/pm32900/inference-fabric-autopilot/internal/alerting"
-	"github.com/pm32900/inference-fabric-autopilot/internal/collector"
-	"github.com/pm32900/inference-fabric-autopilot/internal/recommender"
-	"github.com/pm32900/inference-fabric-autopilot/internal/telemetry"
+	"github.com/p95labs/ifa/internal/alerting"
+	"github.com/p95labs/ifa/internal/collector"
+	"github.com/p95labs/ifa/internal/recommender"
+	"github.com/p95labs/ifa/internal/telemetry"
 )
 
 // Duration wraps time.Duration so it can be written in YAML the way people say

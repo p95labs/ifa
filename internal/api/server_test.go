@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pm32900/inference-fabric-autopilot/internal/recommender"
-	"github.com/pm32900/inference-fabric-autopilot/internal/telemetry"
+	"github.com/p95labs/ifa/internal/recommender"
+	"github.com/p95labs/ifa/internal/telemetry"
 )
 
 type stubStore struct {

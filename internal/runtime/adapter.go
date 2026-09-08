@@ -10,7 +10,7 @@
 // the collection loop.
 package runtime
 
-import "github.com/pm32900/inference-fabric-autopilot/internal/telemetry"
+import "github.com/p95labs/ifa/internal/telemetry"
 
 // Counter names an inference-agnostic cumulative series. Adapters report raw
 // counter values under these keys and the collector converts them to rates,

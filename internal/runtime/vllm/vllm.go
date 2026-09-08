@@ -30,9 +30,9 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/pm32900/inference-fabric-autopilot/internal/promtext"
-	"github.com/pm32900/inference-fabric-autopilot/internal/runtime"
-	"github.com/pm32900/inference-fabric-autopilot/internal/telemetry"
+	"github.com/p95labs/ifa/internal/promtext"
+	"github.com/p95labs/ifa/internal/runtime"
+	"github.com/p95labs/ifa/internal/telemetry"
 )
 
 // Metric names emitted by vLLM. Counter families carry the _total suffix that

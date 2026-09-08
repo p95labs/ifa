@@ -13,7 +13,7 @@ Not by policy — by the absence of any code that could do otherwise.
 - **Kubernetes.** The client is used for `List` and `Watch` on deployments, pods
   and horizontalpodautoscalers. The ClusterRole in the chart grants `get`,
   `list`, `watch` and nothing else; you can read it in
-  [`deploy/helm/autopilot/templates/rbac.yaml`](../deploy/helm/autopilot/templates/rbac.yaml)
+  [`deploy/helm/ifa/templates/rbac.yaml`](../deploy/helm/ifa/templates/rbac.yaml)
   in under a minute. See [RBAC_PERMISSIONS.md](RBAC_PERMISSIONS.md).
 - **The API.** Every handler is registered through a wrapper that rejects
   anything but GET and HEAD. Adding a mutating endpoint means changing that

@@ -17,12 +17,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pm32900/inference-fabric-autopilot/internal/metrics"
-	"github.com/pm32900/inference-fabric-autopilot/internal/runtime"
-	"github.com/pm32900/inference-fabric-autopilot/internal/runtime/dcgm"
-	"github.com/pm32900/inference-fabric-autopilot/internal/runtime/triton"
-	"github.com/pm32900/inference-fabric-autopilot/internal/runtime/vllm"
-	"github.com/pm32900/inference-fabric-autopilot/internal/telemetry"
+	"github.com/p95labs/ifa/internal/metrics"
+	"github.com/p95labs/ifa/internal/runtime"
+	"github.com/p95labs/ifa/internal/runtime/dcgm"
+	"github.com/p95labs/ifa/internal/runtime/triton"
+	"github.com/p95labs/ifa/internal/runtime/vllm"
+	"github.com/p95labs/ifa/internal/telemetry"
 )
 
 // Target is one inference workload to scrape.
@@ -505,7 +505,7 @@ func (c *Collector) fetch(ctx context.Context, rawURL string) ([]byte, error) {
 		return nil, fmt.Errorf("building request for %s: %w", rawURL, err)
 	}
 	req.Header.Set("Accept", "text/plain;version=0.0.4;q=0.8,*/*;q=0.1")
-	req.Header.Set("User-Agent", "inference-fabric-autopilot")
+	req.Header.Set("User-Agent", "ifa")
 
 	resp, err := c.client.Do(req)
 	if err != nil {

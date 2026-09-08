@@ -16,8 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pm32900/inference-fabric-autopilot/internal/recommender"
-	"github.com/pm32900/inference-fabric-autopilot/internal/telemetry"
+	"github.com/p95labs/ifa/internal/recommender"
+	"github.com/p95labs/ifa/internal/telemetry"
 )
 
 // TelemetrySource is the read side of the telemetry store.

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pm32900/inference-fabric-autopilot/internal/promtext"
+	"github.com/p95labs/ifa/internal/promtext"
 )
 
 func render(t *testing.T, r *Registry) *promtext.MetricFamilies {

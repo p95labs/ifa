@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pm32900/inference-fabric-autopilot/internal/runtime"
-	"github.com/pm32900/inference-fabric-autopilot/internal/telemetry"
+	"github.com/p95labs/ifa/internal/runtime"
+	"github.com/p95labs/ifa/internal/telemetry"
 )
 
 const model = "meta-llama/Llama-3.1-8B-Instruct"

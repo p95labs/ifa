@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
-  "title": "Inference Fabric Autopilot chart values",
+  "title": "IFA chart values",
   "description": "Validated by Helm at install time, so a malformed value is rejected before it reaches the cluster.",
   "type": "object",
   "properties": {

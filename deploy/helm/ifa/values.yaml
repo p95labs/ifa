@@ -1,4 +1,4 @@
-# Default values for the Inference Fabric Autopilot chart.
+# Default values for the IFA chart.
 #
 # The chart installs one Deployment. There is no DaemonSet and no node agent:
 # everything IFA reads comes from HTTP endpoints that already exist in the
@@ -7,7 +7,7 @@
 image:
   # registry is prefixed to repository when set, for internal mirrors.
   registry: ""
-  repository: ghcr.io/pm32900/inference-fabric-autopilot
+  repository: ghcr.io/p95labs/ifa
   # Pin a released tag. "latest" is deliberately not the default: a diagnostics
   # tool that silently changes its rule set under you is worse than one that
   # needs an upgrade.

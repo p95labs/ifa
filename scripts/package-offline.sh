@@ -7,9 +7,9 @@
 # Run on a connected machine, copy the output, then on the target:
 #
 #   docker load -i ifa-image-<version>.tar     # or: ctr -n k8s.io images import
-#   helm install autopilot autopilot-<version>.tgz \
+#   helm install ifa ifa-<version>.tgz \
 #     --namespace inference --create-namespace \
-#     --set image.repository=<your-registry>/inference-fabric-autopilot \
+#     --set image.repository=<your-registry>/ifa \
 #     --set image.tag=<version>
 #
 # IFA makes no outbound connections of its own — no licence check, no telemetry,
@@ -21,7 +21,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
 
 VERSION="${1:-$(git describe --tags --always --dirty 2>/dev/null || echo dev)}"
-IMAGE="${IMAGE:-ghcr.io/pm32900/inference-fabric-autopilot}"
+IMAGE="${IMAGE:-ghcr.io/p95labs/ifa}"
 OUT="${OUT:-dist}"
 
 for tool in docker helm; do
@@ -41,7 +41,7 @@ echo "==> Saving image"
 docker save "${IMAGE}:${VERSION}" -o "${OUT}/ifa-image-${VERSION}.tar"
 
 echo "==> Packaging Helm chart"
-helm package deploy/helm/autopilot --version "${VERSION#v}" --app-version "${VERSION#v}" \
+helm package deploy/helm/ifa --version "${VERSION#v}" --app-version "${VERSION#v}" \
   --destination "${OUT}" >/dev/null
 
 echo "==> Checksums"

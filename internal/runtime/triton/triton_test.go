@@ -4,8 +4,8 @@ import (
 	"math"
 	"testing"
 
-	"github.com/pm32900/inference-fabric-autopilot/internal/runtime"
-	"github.com/pm32900/inference-fabric-autopilot/internal/telemetry"
+	"github.com/p95labs/ifa/internal/runtime"
+	"github.com/p95labs/ifa/internal/telemetry"
 )
 
 // defaultPayload is what Triton exposes without --metrics-config

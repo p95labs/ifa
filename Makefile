@@ -1,4 +1,4 @@
-# Inference Fabric Autopilot
+# IFA
 #
 # `make demo` is the one target worth knowing: it builds the control plane and
 # runs it against a simulated inference fleet, so you can see what the project
@@ -11,8 +11,8 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 GO_PACKAGES := ./...
 BIN := bin
-CHART := deploy/helm/autopilot
-IMAGE ?= ghcr.io/pm32900/inference-fabric-autopilot
+CHART := deploy/helm/ifa
+IMAGE ?= ghcr.io/p95labs/ifa
 IMAGE_TAG ?= $(VERSION)
 
 .PHONY: help
@@ -73,12 +73,12 @@ tidy: ## Tidy go.mod and fail if it changed
 .PHONY: helm-lint
 helm-lint: ## Lint and render the Helm chart
 	helm lint $(CHART)
-	helm template autopilot $(CHART) >/dev/null
+	helm template ifa $(CHART) >/dev/null
 # NetworkPolicy, the PDB and the ServiceMonitor are all off by default, so the
 # render above never reaches them. Without this second pass a syntax error in
 # any of the three ships undetected and only surfaces for the operator who
 # turns the feature on.
-	helm template autopilot $(CHART) \
+	helm template ifa $(CHART) \
 		--set networkPolicy.enabled=true \
 		--set networkPolicy.scrapeNamespaces={inference} \
 		--set networkPolicy.dcgmNamespaces={gpu-operator} \

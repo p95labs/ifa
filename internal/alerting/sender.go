@@ -14,7 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pm32900/inference-fabric-autopilot/internal/telemetry"
+	"github.com/p95labs/ifa/internal/telemetry"
 )
 
 // Defaults applied when an option is left zero.
@@ -357,7 +357,7 @@ func (s *Sender) postOnce(ctx context.Context, p Payload) error {
 		return fmt.Errorf("building alert request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "inference-fabric-autopilot")
+	req.Header.Set("User-Agent", "ifa")
 
 	resp, err := s.client.Do(req)
 	if err != nil {

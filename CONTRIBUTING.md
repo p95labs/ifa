@@ -45,8 +45,8 @@ Changes that violate these will not be merged.
 Go 1.25 or newer, and nothing else for building, testing and running the demo.
 
 ```bash
-git clone https://github.com/pm32900/inference-fabric-autopilot
-cd inference-fabric-autopilot
+git clone https://github.com/p95labs/ifa
+cd ifa
 make demo      # see it work
 make verify    # what CI runs
 ```

@@ -1,4 +1,4 @@
-// Command control-plane runs the Inference Fabric Autopilot control plane:
+// Command control-plane runs the IFA control plane:
 // it scrapes inference runtimes, evaluates diagnostic rules, and serves the
 // results over a read-only HTTP API.
 package main
@@ -17,16 +17,16 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pm32900/inference-fabric-autopilot/internal/alerting"
-	"github.com/pm32900/inference-fabric-autopilot/internal/api"
-	"github.com/pm32900/inference-fabric-autopilot/internal/collector"
-	"github.com/pm32900/inference-fabric-autopilot/internal/config"
-	"github.com/pm32900/inference-fabric-autopilot/internal/demo"
-	"github.com/pm32900/inference-fabric-autopilot/internal/k8s"
-	"github.com/pm32900/inference-fabric-autopilot/internal/metrics"
-	"github.com/pm32900/inference-fabric-autopilot/internal/recommender"
-	"github.com/pm32900/inference-fabric-autopilot/internal/storage/timescale"
-	"github.com/pm32900/inference-fabric-autopilot/internal/telemetry"
+	"github.com/p95labs/ifa/internal/alerting"
+	"github.com/p95labs/ifa/internal/api"
+	"github.com/p95labs/ifa/internal/collector"
+	"github.com/p95labs/ifa/internal/config"
+	"github.com/p95labs/ifa/internal/demo"
+	"github.com/p95labs/ifa/internal/k8s"
+	"github.com/p95labs/ifa/internal/metrics"
+	"github.com/p95labs/ifa/internal/recommender"
+	"github.com/p95labs/ifa/internal/storage/timescale"
+	"github.com/p95labs/ifa/internal/telemetry"
 )
 
 // version is overridden at build time with -ldflags "-X main.version=…".
@@ -49,7 +49,7 @@ func run() error {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Printf("inference-fabric-autopilot %s (%s)\n", version, commit())
+		fmt.Printf("ifa %s (%s)\n", version, commit())
 		return nil
 	}
 
@@ -80,7 +80,7 @@ func run() error {
 			"endpoint", demoServer.BaseURL(), "workloads", len(demoServer.Scenarios()))
 	}
 
-	log.Info("starting inference-fabric-autopilot", "version", version, "config", cfg.String())
+	log.Info("starting ifa", "version", version, "config", cfg.String())
 
 	// ── Telemetry store, with an optional durable sink ───────────────────────
 	storeOpts := []telemetry.StoreOption{

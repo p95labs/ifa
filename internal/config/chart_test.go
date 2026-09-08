@@ -17,7 +17,7 @@ import (
 // This test loads the chart's block through the real loader, so the two cannot
 // drift apart without the build failing.
 func TestChartValuesMatchTheConfigSchema(t *testing.T) {
-	valuesPath := filepath.Join("..", "..", "deploy", "helm", "autopilot", "values.yaml")
+	valuesPath := filepath.Join("..", "..", "deploy", "helm", "ifa", "values.yaml")
 	raw, err := os.ReadFile(valuesPath)
 	if err != nil {
 		t.Fatalf("reading chart values: %v", err)

@@ -105,14 +105,14 @@ jobs:
           version: v3.16.3
 
       - name: Lint
-        run: helm lint deploy/helm/autopilot
+        run: helm lint deploy/helm/ifa
 
       - name: Render with defaults
-        run: helm template autopilot deploy/helm/autopilot > /dev/null
+        run: helm template ifa deploy/helm/ifa > /dev/null
 
       - name: Render with every optional feature enabled
         run: |
-          helm template autopilot deploy/helm/autopilot \
+          helm template ifa deploy/helm/ifa \
             --set networkPolicy.enabled=true \
             --set podDisruptionBudget.enabled=true \
             --set serviceMonitor.enabled=true \
@@ -126,7 +126,7 @@ jobs:
           curl -sSLo /tmp/kubeconform.tar.gz \
             https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
           tar -xzf /tmp/kubeconform.tar.gz -C /tmp
-          helm template autopilot deploy/helm/autopilot \
+          helm template ifa deploy/helm/ifa \
             --set networkPolicy.enabled=true \
             --set podDisruptionBudget.enabled=true \
           | /tmp/kubeconform -strict -summary -kubernetes-version 1.30.0 \
@@ -204,8 +204,8 @@ jobs:
       - name: IFA pod logs on failure
         if: failure()
         run: |
-          kubectl logs --namespace autopilot \
-            -l app.kubernetes.io/name=autopilot --tail=100 2>/dev/null || true
+          kubectl logs --namespace ifa \
+            -l app.kubernetes.io/name=ifa --tail=100 2>/dev/null || true
 
       - name: Cluster state on failure
         if: failure()
