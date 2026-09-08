@@ -15,6 +15,15 @@ metadata:
   namespace: inference
   labels:
     app: vllm-example
+    # inference.io/runtime is a LABEL — the value is short, from a fixed set,
+    # and useful for label selectors.
+    inference.io/runtime: vllm
+  annotations:
+    # inference.io/model is an ANNOTATION, not a label, because Hugging Face
+    # model IDs (e.g. "facebook/opt-125m") contain "/" which is not a valid
+    # Kubernetes label value character. Annotations have no such restriction.
+    # This annotation is optional; IFA continues to function without it.
+    inference.io/model: facebook/opt-125m
 spec:
   replicas: 1
   selector:

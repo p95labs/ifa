@@ -21,9 +21,9 @@ func discard() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 }
 
-func deployment(ns, name string, replicas, ready int32, lbls map[string]string) *appsv1.Deployment {
+func deployment(ns, name string, replicas, ready int32, lbls, anns map[string]string) *appsv1.Deployment {
 	return &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: lbls},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: lbls, Annotations: anns},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": name}},
@@ -95,10 +95,10 @@ func startWatcher(t *testing.T, opts Options, objects ...runtime.Object) *Watche
 
 func TestDiscoversDeploymentsWithReplicaCounts(t *testing.T) {
 	w := startWatcher(t, Options{Namespace: "inference"},
-		deployment("inference", "chat", 4, 2, map[string]string{
-			LabelRuntime: "vllm",
-			LabelModel:   "meta-llama/Llama-3.1-8B-Instruct",
-		}),
+		deployment("inference", "chat", 4, 2,
+			map[string]string{LabelRuntime: "vllm"},
+			map[string]string{AnnotationModel: "meta-llama/Llama-3.1-8B-Instruct"},
+		),
 		pod("inference", "chat-a", "chat", 3),
 		pod("inference", "chat-b", "chat", 1),
 		hpa("inference", "chat-hpa", "chat", 12),
@@ -114,7 +114,7 @@ func TestDiscoversDeploymentsWithReplicaCounts(t *testing.T) {
 		t.Errorf("identity = %s/%s", got.Namespace, got.Name)
 	}
 	if got.Runtime != "vllm" || got.ModelName != "meta-llama/Llama-3.1-8B-Instruct" {
-		t.Errorf("labels not read: runtime=%q model=%q", got.Runtime, got.ModelName)
+		t.Errorf("metadata not read: runtime=%q model=%q", got.Runtime, got.ModelName)
 	}
 	if got.Replicas != 4 || got.ReadyReplicas != 2 {
 		t.Errorf("replicas = %d/%d, want 4/2", got.Replicas, got.ReadyReplicas)
@@ -136,7 +136,7 @@ func TestDiscoversDeploymentsWithReplicaCounts(t *testing.T) {
 // than inventing one.
 func TestNoHPAMeansNoCeiling(t *testing.T) {
 	w := startWatcher(t, Options{Namespace: "inference"},
-		deployment("inference", "chat", 3, 3, nil))
+		deployment("inference", "chat", 3, 3, nil, nil))
 
 	_, _, max, ok := w.Replicas("inference", "chat")
 	if !ok {
@@ -150,7 +150,7 @@ func TestNoHPAMeansNoCeiling(t *testing.T) {
 // An HPA pointing at something else must not be attributed to this deployment.
 func TestHPAForAnotherDeploymentIsIgnored(t *testing.T) {
 	w := startWatcher(t, Options{Namespace: "inference"},
-		deployment("inference", "chat", 3, 3, nil),
+		deployment("inference", "chat", 3, 3, nil, nil),
 		hpa("inference", "other-hpa", "some-other-deployment", 40),
 	)
 	_, _, max, _ := w.Replicas("inference", "chat")
@@ -164,7 +164,7 @@ func TestHPAForAnotherDeploymentIsIgnored(t *testing.T) {
 // exactly like an outage.
 func TestUnknownWorkloadReportsNotFound(t *testing.T) {
 	w := startWatcher(t, Options{Namespace: "inference"},
-		deployment("inference", "chat", 3, 3, nil))
+		deployment("inference", "chat", 3, 3, nil, nil))
 
 	if _, _, _, ok := w.Replicas("inference", "does-not-exist"); ok {
 		t.Error("an unknown workload was reported as found")
@@ -176,8 +176,8 @@ func TestUnknownWorkloadReportsNotFound(t *testing.T) {
 
 func TestLabelSelectorNarrowsDiscovery(t *testing.T) {
 	objects := []runtime.Object{
-		deployment("inference", "chat", 1, 1, map[string]string{LabelRuntime: "vllm"}),
-		deployment("inference", "unrelated-web-app", 1, 1, map[string]string{"app": "web"}),
+		deployment("inference", "chat", 1, 1, map[string]string{LabelRuntime: "vllm"}, nil),
+		deployment("inference", "unrelated-web-app", 1, 1, map[string]string{"app": "web"}, nil),
 	}
 
 	all := startWatcher(t, Options{Namespace: "inference"}, objects...).All()
@@ -193,7 +193,7 @@ func TestLabelSelectorNarrowsDiscovery(t *testing.T) {
 
 func TestPodsOfAnotherDeploymentDoNotCountAsRestarts(t *testing.T) {
 	w := startWatcher(t, Options{Namespace: "inference"},
-		deployment("inference", "chat", 1, 1, nil),
+		deployment("inference", "chat", 1, 1, nil, nil),
 		pod("inference", "chat-a", "chat", 2),
 		pod("inference", "other-x", "other", 99),
 	)
@@ -201,6 +201,74 @@ func TestPodsOfAnotherDeploymentDoNotCountAsRestarts(t *testing.T) {
 	if all[0].RestartCount != 2 {
 		t.Errorf("restart count = %d, want 2 — another deployment's pods were counted", all[0].RestartCount)
 	}
+}
+
+// TestModelAnnotation is the regression suite for the label-to-annotation
+// migration. The real Kubernetes API server rejects Hugging Face model IDs
+// (e.g. "facebook/opt-125m") as label values because '/' is not an allowed
+// character. The fake clientset used by other tests does not enforce this
+// validation, which is exactly why this class of bug goes undetected until a
+// real API server is involved. Model identity therefore lives in an annotation
+// where the character set is unrestricted.
+func TestModelAnnotation(t *testing.T) {
+	t.Run("model comes from annotation not label", func(t *testing.T) {
+		w := startWatcher(t, Options{Namespace: "inference"},
+			deployment("inference", "svc", 1, 1,
+				map[string]string{LabelRuntime: "vllm"},
+				map[string]string{AnnotationModel: "facebook/opt-125m"},
+			),
+		)
+		got := w.All()[0]
+		if got.Runtime != "vllm" {
+			t.Errorf("runtime = %q, want \"vllm\" (from label)", got.Runtime)
+		}
+		if got.ModelName != "facebook/opt-125m" {
+			t.Errorf("model = %q, want \"facebook/opt-125m\" (from annotation)", got.ModelName)
+		}
+	})
+
+	t.Run("slash in model ID is preserved exactly", func(t *testing.T) {
+		// Real Kubernetes rejects '/' in label values. This test documents why
+		// model names must be annotations, and it fails if someone moves the
+		// model back to a label (since the stored string would be sanitised or
+		// the API server would reject the manifest).
+		const modelID = "meta-llama/Llama-3.1-8B-Instruct"
+		w := startWatcher(t, Options{Namespace: "inference"},
+			deployment("inference", "svc", 1, 1, nil,
+				map[string]string{AnnotationModel: modelID}),
+		)
+		if got := w.All()[0].ModelName; got != modelID {
+			t.Errorf("model = %q, want %q — '/' must survive round-trip", got, modelID)
+		}
+	})
+
+	t.Run("missing annotation returns empty string without panic", func(t *testing.T) {
+		w := startWatcher(t, Options{Namespace: "inference"},
+			deployment("inference", "svc", 1, 1,
+				map[string]string{LabelRuntime: "vllm"}, nil),
+		)
+		got := w.All()[0]
+		if got.ModelName != "" {
+			t.Errorf("model = %q, want \"\" when annotation is absent", got.ModelName)
+		}
+		if got.Runtime != "vllm" {
+			t.Errorf("runtime = %q, want \"vllm\" — label must still be read when annotation is absent", got.Runtime)
+		}
+	})
+
+	t.Run("model annotation does not appear in label map", func(t *testing.T) {
+		// Validates that model identity has been fully removed from labels so
+		// it cannot accidentally be used as a selector.
+		w := startWatcher(t, Options{Namespace: "inference"},
+			deployment("inference", "svc", 1, 1,
+				map[string]string{LabelRuntime: "vllm"},
+				map[string]string{AnnotationModel: "facebook/opt-125m"},
+			),
+		)
+		if _, ok := w.All()[0].Labels[AnnotationModel]; ok {
+			t.Error("inference.io/model found in Labels — it must only appear as an annotation")
+		}
+	})
 }
 
 func TestInvalidLabelSelectorIsRejected(t *testing.T) {
