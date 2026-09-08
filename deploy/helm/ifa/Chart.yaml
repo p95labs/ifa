@@ -1,5 +1,5 @@
 apiVersion: v2
-name: autopilot
+name: ifa
 description: Read-only diagnostics and recommendations for LLM inference workloads on Kubernetes
 type: application
 
@@ -10,9 +10,9 @@ appVersion: "0.2.0"
 
 kubeVersion: ">=1.25.0-0"
 
-home: https://github.com/pm32900/inference-fabric-autopilot
+home: https://github.com/p95labs/ifa
 sources:
-  - https://github.com/pm32900/inference-fabric-autopilot
+  - https://github.com/p95labs/ifa
 
 keywords:
   - vllm

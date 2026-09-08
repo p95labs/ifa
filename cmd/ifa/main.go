@@ -1,4 +1,4 @@
-// Command ifa is the terminal client for an Inference Fabric Autopilot control
+// Command ifa is the terminal client for an IFA control
 // plane.
 //
 // It is a thin client on purpose: everything it prints comes from the HTTP API,
@@ -20,11 +20,11 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/pm32900/inference-fabric-autopilot/internal/promtext"
-	"github.com/pm32900/inference-fabric-autopilot/internal/runtime"
-	"github.com/pm32900/inference-fabric-autopilot/internal/runtime/triton"
-	"github.com/pm32900/inference-fabric-autopilot/internal/runtime/vllm"
-	"github.com/pm32900/inference-fabric-autopilot/internal/telemetry"
+	"github.com/p95labs/ifa/internal/promtext"
+	"github.com/p95labs/ifa/internal/runtime"
+	"github.com/p95labs/ifa/internal/runtime/triton"
+	"github.com/p95labs/ifa/internal/runtime/vllm"
+	"github.com/p95labs/ifa/internal/telemetry"
 )
 
 const defaultBaseURL = "http://localhost:8080"
@@ -69,7 +69,7 @@ func run(args []string, out io.Writer) error {
 }
 
 func usage(out io.Writer) {
-	fmt.Fprint(out, `ifa — inspect an Inference Fabric Autopilot control plane
+	fmt.Fprint(out, `ifa — inspect an IFA control plane
 
 Usage:
   ifa <command> [flags]

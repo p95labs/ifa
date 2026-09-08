@@ -1,10 +1,10 @@
-# Inference Fabric Autopilot
+# IFA
 
 **Read-only diagnostics for LLM inference workloads on Kubernetes.** It reads what vLLM and Triton already expose, combines those signals with Kubernetes state, and tells you *which* problem a workload has — not just that a number crossed a line.
 
-[![CI](https://github.com/pm32900/inference-fabric-autopilot/actions/workflows/ci.yml/badge.svg)](https://github.com/pm32900/inference-fabric-autopilot/actions/workflows/ci.yml)
-[![Go Reference](https://pkg.go.dev/badge/github.com/pm32900/inference-fabric-autopilot.svg)](https://pkg.go.dev/github.com/pm32900/inference-fabric-autopilot)
-[![Go Report Card](https://goreportcard.com/badge/github.com/pm32900/inference-fabric-autopilot)](https://goreportcard.com/report/github.com/pm32900/inference-fabric-autopilot)
+[![CI](https://github.com/p95labs/ifa/actions/workflows/ci.yml/badge.svg)](https://github.com/p95labs/ifa/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/p95labs/ifa.svg)](https://pkg.go.dev/github.com/p95labs/ifa)
+[![Go Report Card](https://goreportcard.com/badge/github.com/p95labs/ifa)](https://goreportcard.com/report/github.com/p95labs/ifa)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
 ![Status: alpha](https://img.shields.io/badge/status-alpha-orange.svg)
 
@@ -45,8 +45,8 @@ IFA scrapes the runtime metrics you already have, joins them with Kubernetes rep
 No cluster, no GPU, no vLLM deployment:
 
 ```bash
-git clone https://github.com/pm32900/inference-fabric-autopilot
-cd inference-fabric-autopilot
+git clone https://github.com/p95labs/ifa
+cd ifa
 make demo
 ```
 
@@ -152,7 +152,7 @@ Nineteen rules across seven families. Each has a permanent code, a severity, and
 ## Install
 
 ```bash
-helm install autopilot deploy/helm/autopilot \
+helm install ifa deploy/helm/ifa \
   --namespace inference --create-namespace \
   --set image.tag=v0.2.0 \
   --set-json 'config.collector.targets=[{

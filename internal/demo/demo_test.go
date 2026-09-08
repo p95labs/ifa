@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pm32900/inference-fabric-autopilot/internal/collector"
-	"github.com/pm32900/inference-fabric-autopilot/internal/demo"
-	"github.com/pm32900/inference-fabric-autopilot/internal/recommender"
-	"github.com/pm32900/inference-fabric-autopilot/internal/telemetry"
+	"github.com/p95labs/ifa/internal/collector"
+	"github.com/p95labs/ifa/internal/demo"
+	"github.com/p95labs/ifa/internal/recommender"
+	"github.com/p95labs/ifa/internal/telemetry"
 )
 
 // TestDemoScenariosProduceTheirIntendedDiagnosis is the project's end-to-end

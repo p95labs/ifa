@@ -1,4 +1,4 @@
-module github.com/pm32900/inference-fabric-autopilot
+module github.com/p95labs/ifa
 
 go 1.25.0
 

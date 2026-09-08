@@ -72,10 +72,10 @@ tight.
 ## Verifying it yourself
 
 ```bash
-kubectl get clusterrole autopilot -o yaml     # or: kubectl -n inference get role autopilot -o yaml
+kubectl get clusterrole ifa -o yaml     # or: kubectl -n inference get role ifa -o yaml
 
 # Confirm the ServiceAccount cannot write:
-SA=system:serviceaccount:inference:autopilot
+SA=system:serviceaccount:inference:ifa
 kubectl auth can-i --as="$SA" delete deployments -n inference   # no
 kubectl auth can-i --as="$SA" create pods        -n inference   # no
 kubectl auth can-i --as="$SA" get secrets        -n inference   # no

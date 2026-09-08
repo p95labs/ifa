@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pm32900/inference-fabric-autopilot/internal/telemetry"
+	"github.com/p95labs/ifa/internal/telemetry"
 )
 
 var epoch = time.Date(2026, 5, 4, 9, 0, 0, 0, time.UTC)

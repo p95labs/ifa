@@ -2,13 +2,13 @@
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: {{ include "autopilot.fullname" . }}
+  name: {{ include "ifa.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "autopilot.labels" . | nindent 4 }}
+    {{- include "ifa.labels" . | nindent 4 }}
 spec:
   minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
   selector:
     matchLabels:
-      {{- include "autopilot.selectorLabels" . | nindent 6 }}
+      {{- include "ifa.selectorLabels" . | nindent 6 }}
 {{- end }}

@@ -15,8 +15,8 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/pm32900/inference-fabric-autopilot/internal/promtext"
-	"github.com/pm32900/inference-fabric-autopilot/internal/telemetry"
+	"github.com/p95labs/ifa/internal/promtext"
+	"github.com/p95labs/ifa/internal/telemetry"
 )
 
 // DCGM Exporter metric names. Field values are documented at

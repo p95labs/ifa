@@ -24,7 +24,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/pm32900/inference-fabric-autopilot/internal/telemetry"
+	"github.com/p95labs/ifa/internal/telemetry"
 )
 
 // Code identifies a rule. Codes are permanent and documented in

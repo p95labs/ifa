@@ -1,6 +1,6 @@
 # Helm values override for the kind integration test.
 #
-# Only values that differ from deploy/helm/autopilot/values.yaml defaults are
+# Only values that differ from deploy/helm/ifa/values.yaml defaults are
 # listed. The rest are inherited unchanged.
 #
 # All diagnosis-semantic thresholds (ttft_p95_ms, queue_share_of_ttft_pct,

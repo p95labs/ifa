@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # kind-integration.sh — end-to-end integration test for Inference Fabric
-# Autopilot (IFA) using a local kind cluster.
+# IFA using a local kind cluster.
 #
 # The test validates the full path from a Kubernetes-discovered inference
 # workload through in-cluster metrics scraping to the recommendations API,
@@ -60,12 +60,12 @@ IFA_IMAGE="${IFA_IMAGE:-ifa:integration-test}"
 # when Docker's image store holds a multi-arch manifest list whose non-native
 # arch blobs are absent (common with Docker Desktop on Apple Silicon).
 BUSYBOX_IMAGE="busybox-fixture:1.36"
-IFA_NAMESPACE="autopilot"
+IFA_NAMESPACE="ifa"
 FIXTURE_NAMESPACE="inference"
 LOCAL_PORT="${IFA_LOCAL_PORT:-18080}"
 FIXTURE_PATH="${ROOT}/internal/runtime/vllm/testdata/vllm_v1_queued.txt"
 VALUES_FILE="${ROOT}/test/integration/kind-values.yaml"
-CHART_DIR="${ROOT}/deploy/helm/autopilot"
+CHART_DIR="${ROOT}/deploy/helm/ifa"
 IFA_API="http://localhost:${LOCAL_PORT}"
 
 PF_PID=""
@@ -216,14 +216,14 @@ kubectl rollout status deployment/vllm-fixture \
 
 # ── IFA Helm installation ─────────────────────────────────────────────────────
 echo "==> Installing IFA via Helm (namespace: ${IFA_NAMESPACE})"
-helm install autopilot "${CHART_DIR}" \
+helm install ifa "${CHART_DIR}" \
     --namespace "${IFA_NAMESPACE}" \
     --values "${VALUES_FILE}" \
     --wait \
     --timeout 120s
 
 echo "==> Waiting for IFA Deployment rollout"
-kubectl rollout status deployment/autopilot \
+kubectl rollout status deployment/ifa \
     --namespace "${IFA_NAMESPACE}" \
     --timeout=120s
 
@@ -231,7 +231,7 @@ kubectl rollout status deployment/autopilot \
 echo "==> Starting port-forward → ${IFA_API}"
 kubectl port-forward \
     --namespace "${IFA_NAMESPACE}" \
-    svc/autopilot "${LOCAL_PORT}:8080" &
+    svc/ifa "${LOCAL_PORT}:8080" &
 PF_PID=$!
 # Give the port-forward a moment to establish.
 sleep 3
@@ -264,7 +264,7 @@ if ! assert_eventually "GET /api/v1/readyz returns 200" 30 2 \
         curl -fsS "${IFA_API}/api/v1/readyz"; then
     echo "--- IFA pod logs ---" >&2
     kubectl logs --namespace "${IFA_NAMESPACE}" \
-        -l app.kubernetes.io/name=autopilot --tail=80 >&2 || true
+        -l app.kubernetes.io/name=ifa --tail=80 >&2 || true
     exit 1
 fi
 echo "    PASS: IFA API is ready"
@@ -302,7 +302,7 @@ if ! assert_eventually "requests_waiting == 12 in telemetry" 20 3 \
         | jq '[.items[] | select(.namespace == "inference")]' >&2 || true
     echo "--- IFA pod logs (scrape errors) ---" >&2
     kubectl logs --namespace "${IFA_NAMESPACE}" \
-        -l app.kubernetes.io/name=autopilot --tail=40 >&2 || true
+        -l app.kubernetes.io/name=ifa --tail=40 >&2 || true
     exit 1
 fi
 echo "    PASS: requests_waiting=12 confirmed from queued fixture"
@@ -369,7 +369,7 @@ if ! assert_eventually \
         | jq '[.items[] | select(.namespace == "inference") | {workload_name, ttft_p95_ms, queue_time_p95_ms, requests_waiting}]' >&2 || true
     echo "--- IFA pod logs ---" >&2
     kubectl logs --namespace "${IFA_NAMESPACE}" \
-        -l app.kubernetes.io/name=autopilot --tail=80 >&2 || true
+        -l app.kubernetes.io/name=ifa --tail=80 >&2 || true
     exit 1
 fi
 echo "    PASS: IFA-LAT-002 confirmed — ttft_p95_ms≈32000ms, threshold=1000, window_seconds>=10"

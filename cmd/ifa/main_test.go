@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pm32900/inference-fabric-autopilot/internal/telemetry"
+	"github.com/p95labs/ifa/internal/telemetry"
 )
 
 // Go's flag package stops parsing at the first non-flag argument, so

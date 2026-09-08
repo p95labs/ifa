@@ -33,9 +33,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 FROM gcr.io/distroless/static-debian12:nonroot
 
 ARG VERSION=dev
-LABEL org.opencontainers.image.title="inference-fabric-autopilot" \
+LABEL org.opencontainers.image.title="ifa" \
       org.opencontainers.image.description="Read-only diagnostics for LLM inference workloads on Kubernetes" \
-      org.opencontainers.image.source="https://github.com/pm32900/inference-fabric-autopilot" \
+      org.opencontainers.image.source="https://github.com/p95labs/ifa" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.version="${VERSION}"
 

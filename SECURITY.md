@@ -14,7 +14,7 @@ The most recent release only. There are no maintained release branches yet.
 ## Reporting a vulnerability
 
 Use GitHub's private vulnerability reporting on this repository
-([Security → Report a vulnerability](https://github.com/pm32900/inference-fabric-autopilot/security/advisories/new)).
+([Security → Report a vulnerability](https://github.com/p95labs/ifa/security/advisories/new)).
 Please do not open a public issue for anything exploitable.
 
 Include what you did, what happened, and what an attacker would gain. A proof of

@@ -1,10 +1,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "autopilot.fullname" . }}
+  name: {{ include "ifa.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "autopilot.labels" . | nindent 4 }}
+    {{- include "ifa.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
   # IFA holds telemetry in memory, so a rolling update starts a replica with an
@@ -14,7 +14,7 @@ spec:
     type: Recreate
   selector:
     matchLabels:
-      {{- include "autopilot.selectorLabels" . | nindent 6 }}
+      {{- include "ifa.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       annotations:
@@ -26,12 +26,12 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
       labels:
-        {{- include "autopilot.selectorLabels" . | nindent 8 }}
+        {{- include "ifa.selectorLabels" . | nindent 8 }}
         {{- with .Values.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
-      serviceAccountName: {{ include "autopilot.serviceAccountName" . }}
+      serviceAccountName: {{ include "ifa.serviceAccountName" . }}
       {{- with .Values.image.pullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -40,7 +40,7 @@ spec:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: control-plane
-          image: {{ include "autopilot.image" . | quote }}
+          image: {{ include "ifa.image" . | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           args:
             - -config
@@ -93,7 +93,7 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: {{ include "autopilot.fullname" . }}
+            name: {{ include "ifa.fullname" . }}
         - name: tmp
           emptyDir:
             medium: Memory
