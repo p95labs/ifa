@@ -1,0 +1,57 @@
+# Helm values override for the kind integration test.
+#
+# Only values that differ from deploy/helm/autopilot/values.yaml defaults are
+# listed. The rest are inherited unchanged.
+#
+# All diagnosis-semantic thresholds (ttft_p95_ms, queue_share_of_ttft_pct,
+# queue_waiting_requests, etc.) are left at their production defaults.
+# Only CI-speed-specific values are overridden.
+#
+# Key overrides and their rationale:
+#
+#   image.pullPolicy: Never
+#       The image is loaded into kind via `kind load docker-image`, so
+#       Kubernetes must not try to pull it from a registry.
+#
+#   collector.interval: 5s / timeout: 4s
+#       Shorter than the production default (15 s) so CI waits seconds
+#       rather than minutes for the window to fill. Rule semantics are
+#       unchanged; only the wall-clock wait shrinks.
+#       timeout must be < interval to satisfy the collector's startup check.
+#
+#   recommender.thresholds.sustain_for: 10s
+#       Shorter than the production default (45 s) so CI waits seconds
+#       rather than minutes. With interval=5 s, e.Span() reaches 10 s after
+#       the third collection cycle, exercising the recent(SustainFor) code
+#       path that governs window tracking in both Span() and Sustained().
+#       Rule semantics are unchanged.
+
+image:
+  repository: ifa
+  tag: integration-test
+  pullPolicy: Never
+
+config:
+  cluster_name: kind-integration
+
+  logging:
+    level: debug
+    format: text
+
+  collector:
+    interval: 5s
+    timeout: 4s
+    targets:
+      - name: vllm-fixture
+        namespace: inference
+        runtime: vllm
+        model_name: facebook/opt-125m
+        metrics_url: http://vllm-fixture.inference.svc:9090/metrics
+
+  kubernetes:
+    enabled: true
+    namespace: inference
+
+  recommender:
+    thresholds:
+      sustain_for: 10s
