@@ -33,12 +33,21 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
-// Well-known labels used to identify an inference workload and the model it
-// serves. They are conventions rather than a standard, so the runtime label is
-// optional and discovery falls back to the workload's own name.
+// Well-known labels and annotations used by IFA's Kubernetes discovery
+// convention.
+//
+// Runtime is a LABEL because it takes values from a small, fixed set ("vllm",
+// "triton", …) and is useful for label selectors and field queries.
+//
+// Model identity is an ANNOTATION because real Hugging Face model IDs contain
+// "/" (e.g. "facebook/opt-125m", "meta-llama/Llama-3.1-8B-Instruct"), which
+// is not a valid Kubernetes label value character. Annotations do not restrict
+// the character set, so they carry the ID without sanitisation. Neither
+// convention is required for IFA to function; omitting them leaves the
+// corresponding fields empty rather than causing an error.
 const (
-	LabelRuntime = "inference.io/runtime"
-	LabelModel   = "inference.io/model"
+	LabelRuntime    = "inference.io/runtime"
+	AnnotationModel = "inference.io/model"
 )
 
 // Workload is the discovered state of one inference deployment.
@@ -215,7 +224,7 @@ func (w *Watcher) workloadFor(d *appsv1.Deployment) Workload {
 		Name:          d.Name,
 		Namespace:     d.Namespace,
 		Runtime:       d.Labels[LabelRuntime],
-		ModelName:     d.Labels[LabelModel],
+		ModelName:     d.Annotations[AnnotationModel],
 		ReadyReplicas: d.Status.ReadyReplicas,
 		Labels:        d.Labels,
 		LastUpdated:   time.Now().UTC(),
