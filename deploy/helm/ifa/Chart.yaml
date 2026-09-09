@@ -5,8 +5,8 @@ type: application
 
 # The chart version tracks the chart; appVersion tracks the IFA release it
 # installs by default. Both move together for now.
-version: 0.2.0
-appVersion: "0.2.0"
+version: 0.1.0-alpha.1
+appVersion: "0.1.0-alpha.1"
 
 kubeVersion: ">=1.25.0-0"
 
