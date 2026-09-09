@@ -2,6 +2,9 @@ package triton
 
 import (
 	"math"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/p95labs/ifa/internal/runtime"
@@ -195,4 +198,160 @@ func TestMalformedPayloadIsSurvivable(t *testing.T) {
 	if r.UnparseableLines == 0 {
 		t.Error("the malformed line was not counted")
 	}
+}
+
+// TestCapturedPayload runs the adapter against three verbatim /metrics payloads
+// captured from a real Triton 25.12 server (ARM64 CPU backend, Python echo model).
+// See testdata/README.md for full provenance.
+func TestCapturedPayload(t *testing.T) {
+	const capturedModel = "echo"
+
+	cases := []struct {
+		name    string
+		fixture string
+
+		wantFinished   float64
+		wantFailed     float64
+		wantWaiting    float64
+		wantMissingLen int
+		wantP95Ms      float64
+		wantQueueP95Ms float64
+		wantP50Ms      float64
+		wantP99Ms      float64
+		hasSummary     bool
+	}{
+		{
+			name:           "idle",
+			fixture:        "triton_captured_idle.txt",
+			wantFinished:   0,
+			wantFailed:     0,
+			wantWaiting:    0,
+			wantMissingLen: 3,
+		},
+		{
+			name:           "loaded",
+			fixture:        "triton_captured_loaded.txt",
+			wantFinished:   280,
+			wantFailed:     0,
+			wantWaiting:    0,
+			wantMissingLen: 3,
+		},
+		{
+			name:           "summary-latencies",
+			fixture:        "triton_captured_summary.txt",
+			wantFinished:   200,
+			wantFailed:     0,
+			wantWaiting:    0,
+			wantMissingLen: 3,
+			hasSummary:     true,
+			wantP50Ms:      0.504,
+			wantP95Ms:      0.921,
+			wantP99Ms:      1.156,
+			wantQueueP95Ms: 0.102,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b, err := os.ReadFile(filepath.Join("testdata", tc.fixture))
+			if err != nil {
+				t.Fatalf("reading fixture: %v", err)
+			}
+			body := string(b)
+
+			// Confirm the fixture contains the expected model label before
+			// parsing: a wrong label produces all-unmeasured fields silently.
+			if got := firstTritonModel(body); got != capturedModel {
+				t.Fatalf("fixture model label = %q, want %q", got, capturedModel)
+			}
+
+			r, err := New().Parse(body, capturedModel)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			s := r.Snapshot
+
+			if r.UnparseableLines > 0 {
+				t.Errorf("%d unparseable line(s); exposition format may have changed", r.UnparseableLines)
+			}
+
+			if got := len(r.Missing); got != tc.wantMissingLen {
+				t.Errorf("Missing = %v (len %d), want len %d — GPU metrics must be absent on CPU server",
+					r.Missing, got, tc.wantMissingLen)
+			}
+
+			// GPU fields must be unmeasured (OK==false) — not zero, not present,
+			// unmeasured — because a CPU-only Triton emits no nv_gpu_* families.
+			if s.GPUUtilizationPct.OK {
+				t.Errorf("GPUUtilizationPct.OK = true on CPU server (value=%v); nv_gpu_utilization was absent", s.GPUUtilizationPct.Value)
+			}
+			if s.GPUMemoryUsedPct.OK {
+				t.Errorf("GPUMemoryUsedPct.OK = true on CPU server (value=%v); nv_gpu_memory_* were absent", s.GPUMemoryUsedPct.Value)
+			}
+
+			// Counters.
+			if got := r.Counters[runtime.CounterRequestsFinished]; got != tc.wantFinished {
+				t.Errorf("CounterRequestsFinished = %v, want %v", got, tc.wantFinished)
+			}
+			if got := r.Counters[runtime.CounterRequestsFailed]; got != tc.wantFailed {
+				t.Errorf("CounterRequestsFailed = %v, want %v", got, tc.wantFailed)
+			}
+
+			// Pending count.
+			if !s.RequestsWaiting.OK {
+				t.Error("RequestsWaiting not measured; nv_inference_pending_request_count was present")
+			} else if s.RequestsWaiting.Value != tc.wantWaiting {
+				t.Errorf("RequestsWaiting = %v, want %v", s.RequestsWaiting.Value, tc.wantWaiting)
+			}
+
+			// Latency percentiles: present only when summary_latencies enabled.
+			if tc.hasSummary {
+				checkClose(t, "P50LatencyMs", s.P50LatencyMs, tc.wantP50Ms)
+				checkClose(t, "P95LatencyMs", s.P95LatencyMs, tc.wantP95Ms)
+				checkClose(t, "P99LatencyMs", s.P99LatencyMs, tc.wantP99Ms)
+				checkClose(t, "QueueTimeP95Ms", s.QueueTimeP95Ms, tc.wantQueueP95Ms)
+			} else {
+				for name, m := range map[string]telemetry.Metric{
+					"P50LatencyMs":   s.P50LatencyMs,
+					"P95LatencyMs":   s.P95LatencyMs,
+					"P99LatencyMs":   s.P99LatencyMs,
+					"QueueTimeP95Ms": s.QueueTimeP95Ms,
+				} {
+					if m.OK {
+						t.Errorf("%s measured (%v) without summary_latencies=true", name, m.Value)
+					}
+				}
+			}
+		})
+	}
+}
+
+func checkClose(t *testing.T, name string, got telemetry.Metric, want float64) {
+	t.Helper()
+	if !got.OK {
+		t.Errorf("%s: unmeasured, want %v", name, want)
+		return
+	}
+	if math.Abs(got.Value-want) > 1e-9 {
+		t.Errorf("%s = %v, want %v", name, got.Value, want)
+	}
+}
+
+// firstTritonModel returns the first model label value found in a Triton
+// Prometheus exposition payload. TestCapturedPayload uses it to verify that
+// each captured fixture came from the expected model.
+func firstTritonModel(body string) string {
+	const key = `model="`
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		if i := strings.Index(line, key); i >= 0 {
+			rest := line[i+len(key):]
+			if j := strings.IndexByte(rest, '"'); j >= 0 {
+				return rest[:j]
+			}
+		}
+	}
+	return ""
 }
