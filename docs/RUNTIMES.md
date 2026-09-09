@@ -8,12 +8,11 @@ adapter has actually been validated.
 | Adapter | Implemented against | Tested against | Run against a live server |
 |---|---|---|---|
 | vLLM | `vllm/v1/metrics/loggers.py` (metric names, types, labels, histogram bucket boundaries) | Fixtures built from those definitions, including a V0-era payload and a two-model payload; plus three verbatim live captures (idle, loaded, capacity-queued) from vLLM 0.28.0 | **Yes** — vLLM 0.28.0, ARM64 CPU backend, `facebook/opt-125m`; GPU-backed vLLM not yet validated |
-| Triton | The published metrics documentation | Fixtures for the default and summary-latency configurations | **No** |
+| Triton | The published metrics documentation | Fixtures for the default and summary-latency configurations; plus three verbatim live captures (idle, loaded, summary-latencies-enabled) from Triton 25.12 | **Yes** — Triton 25.12, ARM64 CPU backend, Python echo model; GPU-backed Triton not yet validated |
 | DCGM Exporter | Published field IDs | Fixtures including multi-GPU and partial payloads | **No** |
 
-The vLLM adapter has been validated against a live CPU-backed server; Triton and
-DCGM have not. If you run either, `ifa check <url>` produces the report that
-would close it.
+Both vLLM and Triton adapters have been validated against live CPU-backed servers.
+DCGM has not. If you run it, `ifa check <url>` produces the report that would close it.
 
 ---
 
@@ -193,6 +192,61 @@ Unlike vLLM, Triton *does* expose a failure counter, so `IFA-ERR-001` works.
 Set `model_name` when the server hosts several models. `ifa check` lists the
 models present in a payload when the configured one matches none, which is the
 usual cause of a Triton target reporting nothing.
+
+### Live validation
+
+The adapter was run against a real Triton server with the following configuration:
+
+- **Image:** `nvcr.io/nvidia/tritonserver:25.12-pyt-python-py3`
+  (`sha256:40fd29c56c1b69b5b27514d781e0af52e757b16a3c97a5540e15820d2ddb451d`)
+- **Version:** Triton 25.12
+- **Backend:** CPU (Python backend, ARM64 Docker VM, no GPU)
+- **Model:** `echo` — minimal Python passthrough
+- **Baseline run:** default metrics, no GPU present
+- **Summary-latencies run:** `--metrics-config summary_latencies=true`
+
+`ifa check` against the live `/metrics` endpoint (default mode) reported 16 metric
+families, 0 unparseable lines, and the following status:
+
+```
+nv_inference_request_success        found
+nv_inference_request_failure        found
+nv_inference_pending_request_count  found
+nv_inference_request_duration_us    found
+nv_inference_queue_duration_us      found
+nv_gpu_utilization                  MISSING
+nv_gpu_memory_used_bytes            MISSING
+nv_gpu_memory_total_bytes           MISSING
+nv_inference_request_summary_us     optional, absent
+nv_inference_queue_summary_us       optional, absent
+```
+
+With `--metrics-config summary_latencies=true` the same check reported 31 families
+and both summary families moved from `optional, absent` to `found`. The three GPU
+families remained `MISSING` throughout — a CPU-only host emits none of them.
+
+Three verbatim `/metrics` payloads were captured:
+
+| Fixture | State | Key observed values |
+|---|---|---|
+| `testdata/triton_captured_idle.txt` | Server started, zero requests | request_success=0, pending=0, no GPU metrics |
+| `testdata/triton_captured_loaded.txt` | 280 completed requests | request_success=280, duration_us=121428, queue_duration_us=8417, no GPU metrics |
+| `testdata/triton_captured_summary.txt` | 200 requests, summary latencies enabled | p50=0.504 ms, p95=0.921 ms, p99=1.156 ms, queue_p95=0.102 ms, no GPU metrics |
+
+**GPU fields on a CPU server.** All three captures contain no `nv_gpu_*` families.
+The adapter maps their absence to `OK == false` (unmeasured), not zero. GPU-dependent
+rules do not fire on CPU deployments. The `nv_gpu_utilization` ×100 conversion
+cannot be verified without GPU hardware.
+
+**What this validation does not establish:**
+
+- GPU-backed Triton behavior
+- The `nv_gpu_utilization` ×100 conversion (no GPU to measure)
+- Non-zero pending counts (echo model is too fast)
+- Multi-model label isolation on a live server
+- Dynamic-batcher behavior
+- TensorRT, PyTorch, or ONNX backend behavior
+- Full Kubernetes discovery → scrape → recommendation integration
 
 ---
 

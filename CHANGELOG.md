@@ -87,6 +87,14 @@ against a real vLLM server, and now does.
 - CI covering gofmt, vet, race tests, a demo smoke test, chart lint plus
   kubeconform, a container build, shellcheck and govulncheck.
 - ADRs for the five decisions that shape the design.
+- **Triton live validation.** The Triton adapter was run against a real
+  Triton 25.12 server (ARM64 CPU backend, Python echo model). Three verbatim
+  `/metrics` payloads were captured (idle, post-traffic, summary-latencies-enabled)
+  and are stored in `internal/runtime/triton/testdata/`. `TestCapturedPayload`
+  asserts that GPU fields are unmeasured (`OK == false`) on a CPU-only server, that
+  0 lines are unparseable, and that summary-latency percentiles match the raw
+  quantile values in the capture. See `docs/RUNTIMES.md` for the full validation
+  scope and limitations.
 
 ### Changed
 

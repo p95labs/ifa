@@ -13,9 +13,9 @@
 //     --metrics-config summary_latencies=true, and otherwise leaves them
 //     unmeasured and says so in the missing-metric report.
 //
-// Status: implemented against Triton's documented metric surface and exercised
-// against fixtures. Unlike the vLLM adapter it has not been used against a real
-// deployment by the author — see docs/ROADMAP.md for what that means.
+// Status: implemented against Triton's documented metric surface and validated
+// against a live Triton 25.12 CPU server (Python backend, no GPU). See
+// docs/RUNTIMES.md for full validation scope and limitations.
 package triton
 
 import (
