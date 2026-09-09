@@ -20,7 +20,7 @@ on this page.
 | Prometheus exposition parsing — labels, histograms, summaries, edge cases | Locally validated |
 | Rule engine — 19 rules, suppression, sustained conditions | Locally validated |
 | vLLM adapter | Live-server validated — CPU backend, vLLM 0.28.0, `facebook/opt-125m`; GPU-backed vLLM not yet validated |
-| Triton adapter | Implemented |
+| Triton adapter | Live-server validated — CPU backend, Triton 25.12, Python echo model; GPU-backed Triton not yet validated |
 | DCGM adapter | Implemented |
 | HTTP API, `/api/v1` and legacy paths | Implemented |
 | `ifa` CLI including `ifa check` | Implemented |
@@ -35,7 +35,7 @@ on this page.
 real socket against vLLM-shaped exposition, and each simulated failure mode
 produces its intended diagnosis.
 
-The vLLM adapter has been validated against a live CPU-backed server (see below). Full Kubernetes integration validation remains open.
+The vLLM adapter has been validated against a live CPU-backed server (see below). The Triton adapter has been validated against a live CPU-backed server running Triton 25.12. The kind integration test runs end-to-end in CI against a real cluster.
 
 ## Next, in order
 
@@ -54,16 +54,31 @@ The vLLM adapter has been run against a real server:
 - `TestCapturedPayload` passes against the captured fixture
 
 This validates the vLLM adapter against a real CPU-backed server only. GPU-backed
-vLLM, real DCGM hardware, live Triton, and the Kubernetes discovery → scrape →
-recommendation path all remain unvalidated.
+vLLM and real DCGM hardware remain unvalidated.
 
-### 1. A kind-based integration test in CI
+### Done: kind integration test in CI
 
-Install the chart into a kind cluster, run a small CPU-mode vLLM, assert that
-IFA discovers it, scrapes it, and produces findings. This is what would move
-Kubernetes discovery and the chart from "implemented" to "integration
-validated", and it would catch the class of bug — an RBAC rule that is one verb
-short, a Service port that does not match — that unit tests structurally cannot.
+The chart is installed into a kind cluster in every CI run. A CPU-mode busybox
+target stands in for an inference workload; IFA discovers it via the informer,
+scrapes it, and the test asserts that the expected finding appears. This
+caught a real bug: `inference.io/model` was stored as a Kubernetes label, and
+label values cannot contain `/`, which every Hugging Face model ID does. Moving
+it to an annotation (where values are unrestricted) fixed it — a real API server
+found what a fake clientset had silently accepted.
+
+### Done: live Triton validation (CPU backend)
+
+The Triton adapter was run against a real Triton 25.12 server:
+
+- `nvcr.io/nvidia/tritonserver:25.12-pyt-python-py3`, ARM64 Docker VM
+- Model: `echo` (Python backend, CPU instance group)
+- `ifa check` parsed the live `/metrics` endpoint; zero unparseable lines
+- Three captures: idle, post-traffic (280 requests), and summary-latencies-enabled
+- CPU-only server emits no `nv_gpu_*` families; the adapter correctly maps
+  their absence to `OK == false` — rules depending on GPU metrics do not fire
+- `TestCapturedPayload` passes against all three captured fixtures
+
+GPU-backed Triton, real DCGM hardware, and GPU-backed vLLM remain unvalidated.
 
 ### 2. Per-pod GPU attribution
 
