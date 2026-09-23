@@ -84,16 +84,67 @@ reflect the new environment.
 
 ---
 
+## GPU-backed live capture
+
+### Provenance
+
+- **GPU:** NVIDIA L4, 23034 MiB total memory
+- **Driver:** 580.126.20
+- **vLLM image:** `vllm/vllm-openai:v0.28.0`
+- **Model:** `facebook/opt-125m`
+- **Flags:** `--dtype half --gpu-memory-utilization 0.8 --max-model-len 2048 --num-gpu-blocks-override 1024`
+  (KV cache deliberately constrained to 16,384 tokens / 1024 blocks to make
+  exhaustion reachable without exotic prompt lengths)
+- **Platform:** JarvisLabs.ai GPU VM, Ubuntu 22.04.5, CUDA 13.0
+- **Load generator:** a continuous-refill script -- CONCURRENCY worker threads,
+  each immediately issuing a new request as soon as its previous one
+  completes, for a fixed wall-clock DURATION. This differs from a one-shot
+  batch of N requests: a batch drains as requests finish, while continuous
+  refill sustains pressure for as long as DURATION lasts. Prompt: a fixed
+  223-token prompt (verified via vLLM's `/tokenize` endpoint) repeated to
+  build up input length; `max_tokens` fixed per run; `ignore_eos: true` so
+  every request runs to its full `max_tokens` rather than stopping early.
+  The specific run that produced this capture used 100 concurrent workers,
+  `max_tokens=400`, captured 13 seconds into the run.
+
+### State details
+
+**`vllm_gpu_l4_kv_exhausted.txt`** -- real KV-cache exhaustion under sustained
+concurrent load
+
+- `num_requests_running = 84`
+- `num_requests_waiting = 16`
+- `num_requests_waiting_by_reason{reason="capacity"} = 16`
+- `num_requests_waiting_by_reason{reason="deferred"} = 0`
+- raw `kv_cache_usage_perc = 0.9990224828934506` (approximately 99.9%)
+- `num_preemptions_total = 53366.0` (a cumulative counter; nonzero and
+  actively climbing across the session that produced this capture, which is
+  the signal that matters -- the absolute value includes preemptions from
+  earlier runs in the same long-lived vLLM process)
+
+This is the first vLLM capture in this repository showing genuine KV-cache
+saturation with capacity-driven queuing and active preemption together in one
+payload, captured against real GPU hardware rather than synthesized.
+
+### Checksum
+
+```
+2a958c77963a64225737276b2411e473  vllm_gpu_l4_kv_exhausted.txt
+```
+
 ## Validation scope
 
-These captures validate the vLLM adapter against a real CPU-backed vLLM 0.28.0
-server. They do not establish:
+These CPU captures validate the vLLM adapter against a real CPU-backed vLLM
+0.28.0 server. The GPU-backed capture above additionally validates real
+KV-cache exhaustion, capacity-driven queuing, and active preemption end to
+end. Together they do not establish:
 
-- GPU-backed vLLM behavior
-- Real device-side GPU KV-cache behavior
+- Real device-side GPU KV-cache behavior beyond the single exhaustion capture
+  above (e.g. sustained exhaustion over long time windows, recovery behavior
+  after load drops, multi-GPU KV-cache pooling)
 - Live V0 `gpu_cache_usage_perc` behavior
-- High-KV-cache pressure behavior; observed values were low (under 3%)
-- Preemption behavior; `vllm:num_preemptions_total` was present but preemption was not deliberately exercised
-- DCGM behavior on real GPU hardware
+- DCGM behavior on the official NVIDIA `dcgm-exporter` image (this session's
+  DCGM capture, in `internal/runtime/dcgm/testdata/`, used a JarvisLabs-bundled
+  DCGM-compatible exporter -- see that directory's README for the distinction)
 - Live Triton behavior
-- Full Kubernetes discovery → scrape → recommendation integration
+- Full Kubernetes discovery to scrape to recommendation integration
