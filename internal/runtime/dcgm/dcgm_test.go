@@ -2,6 +2,8 @@ package dcgm
 
 import (
 	"math"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -98,5 +100,71 @@ DCGM_FI_DEV_GPU_UTIL{gpu="2"} 60
 	}
 	if len(devices) != 1 || devices[0].Index != 2 {
 		t.Errorf("got %+v, want only device 2", devices)
+	}
+}
+
+// fixture reads a verbatim testdata payload.
+func fixture(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("testdata", name))
+	if err != nil {
+		t.Fatalf("reading fixture: %v", err)
+	}
+	return string(b)
+}
+
+// TestCapturedPayload runs the adapter against two verbatim /metrics payloads
+// captured from a real NVIDIA L4 GPU via a DCGM-compatible exporter
+// (JarvisLabs guest-monitor). See testdata/README.md for full provenance,
+// including the exporter's measured ~18-20s refresh lag, which is exactly
+// what these two fixtures are a matched pair for: the same real load,
+// sampled before and after the exporter caught up.
+func TestCapturedPayload(t *testing.T) {
+	cases := []struct {
+		name     string
+		fixture  string
+		wantUtil float64
+		wantMem  float64
+	}{
+		{
+			name:     "settled under load",
+			fixture:  "dcgm_l4_under_load_settled.txt",
+			wantUtil: 100,
+			wantMem:  1550,
+		},
+		{
+			name:     "stale during refresh lag",
+			fixture:  "dcgm_l4_refresh_lag_stale.txt",
+			wantUtil: 0,
+			wantMem:  1548,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := fixture(t, tc.fixture)
+			devices, err := Parse(body)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if len(devices) != 1 {
+				t.Fatalf("got %d devices, want 1", len(devices))
+			}
+			d := devices[0]
+			if !d.UtilizationPct.OK {
+				t.Fatalf("utilisation not measured; adapter may need updating")
+			}
+			if math.Abs(d.UtilizationPct.Value-tc.wantUtil) > 1e-9 {
+				t.Errorf("utilisation = %v, want %v", d.UtilizationPct.Value, tc.wantUtil)
+			}
+			// FB_USED stays in the same ~1.5 GiB range in both captures (they
+			// differ by 2 MiB, real session-to-session fluctuation) even though
+			// utilisation differs sharply -- this is what tells us the stale
+			// reading is an exporter-refresh artifact and not a case where the
+			// GPU was genuinely idle.
+			if !d.MemoryUsedMiB.OK || math.Abs(d.MemoryUsedMiB.Value-tc.wantMem) > 1e-9 {
+				t.Errorf("memory used = %v, want %v", d.MemoryUsedMiB.Value, tc.wantMem)
+			}
+		})
 	}
 }
