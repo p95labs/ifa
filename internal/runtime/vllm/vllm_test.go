@@ -254,39 +254,56 @@ vllm:num_requests_running{model_name="m"} 5
 	}
 }
 
-// TestCapturedPayload runs the adapter against three verbatim /metrics payloads
+// TestCapturedPayload runs the adapter against four verbatim /metrics payloads
 // captured from a real vLLM 0.28.0 server (ARM64 CPU backend, facebook/opt-125m).
 // The fixtures are intended to be repository testdata; a missing file causes the test to fail.
 func TestCapturedPayload(t *testing.T) {
 	const capturedModel = "facebook/opt-125m"
 
 	cases := []struct {
-		name        string
-		fixture     string
-		wantRunning float64
-		wantWaiting float64
-		wantKV      float64
+		name                string
+		fixture             string
+		wantRunning         float64
+		wantWaiting         float64
+		wantKV              float64
+		wantCapacityWaiting float64
+		wantDeferredWaiting float64
 	}{
 		{
-			name:        "idle",
-			fixture:     "vllm_v1_captured.txt",
-			wantRunning: 0,
-			wantWaiting: 0,
-			wantKV:      0,
+			name:                "idle",
+			fixture:             "vllm_v1_captured.txt",
+			wantRunning:         0,
+			wantWaiting:         0,
+			wantKV:              0,
+			wantCapacityWaiting: 0,
+			wantDeferredWaiting: 0,
 		},
 		{
-			name:        "loaded",
-			fixture:     "vllm_v1_under_load.txt",
-			wantRunning: 10,
-			wantWaiting: 0,
-			wantKV:      2.857142857142858,
+			name:                "loaded",
+			fixture:             "vllm_v1_under_load.txt",
+			wantRunning:         10,
+			wantWaiting:         0,
+			wantKV:              2.857142857142858,
+			wantCapacityWaiting: 0,
+			wantDeferredWaiting: 0,
 		},
 		{
-			name:        "capacity-queued",
-			fixture:     "vllm_v1_queued.txt",
-			wantRunning: 2,
-			wantWaiting: 12,
-			wantKV:      0.4618937644341847,
+			name:                "capacity-queued",
+			fixture:             "vllm_v1_queued.txt",
+			wantRunning:         2,
+			wantWaiting:         12,
+			wantKV:              0.4618937644341847,
+			wantCapacityWaiting: 12,
+			wantDeferredWaiting: 0,
+		},
+		{
+			name:                "gpu-kv-exhausted",
+			fixture:             "vllm_gpu_l4_kv_exhausted.txt",
+			wantRunning:         84,
+			wantWaiting:         16,
+			wantKV:              99.90224828934506,
+			wantCapacityWaiting: 16,
+			wantDeferredWaiting: 0,
 		},
 	}
 
@@ -315,6 +332,8 @@ func TestCapturedPayload(t *testing.T) {
 			closeTo(t, "requests_running", r.Snapshot.RequestsRunning, tc.wantRunning)
 			closeTo(t, "requests_waiting", r.Snapshot.RequestsWaiting, tc.wantWaiting)
 			closeTo(t, "kv_cache_usage_percent", r.Snapshot.KVCacheUsagePct, tc.wantKV)
+			closeTo(t, "waiting_for_capacity", r.Snapshot.WaitingForCapacity, tc.wantCapacityWaiting)
+			closeTo(t, "waiting_deferred", r.Snapshot.WaitingDeferred, tc.wantDeferredWaiting)
 		})
 	}
 }

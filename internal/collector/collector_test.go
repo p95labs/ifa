@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -645,5 +647,84 @@ func TestOnCycleFiredAfterEachScrape(t *testing.T) {
 	// OnCycle has been called at least once, OnFirstCycle must be at exactly 1.
 	if firstCycles.Load() != 1 {
 		t.Fatalf("OnFirstCycle was called more than once")
+	}
+}
+
+// TestRealCaptureProducesPreemptionRate replays a verbatim payload captured
+// from a real GPU-backed vLLM 0.28.0 server under genuine KV-cache exhaustion
+// (see internal/runtime/vllm/testdata/README.md for full provenance) through
+// two scrapes, to prove the real capture's structure survives the full
+// counter-rate pipeline end to end.
+//
+// The specific rate value asserted here is a controlled test input, not
+// itself something measured live: num_preemptions_total is a cumulative
+// counter, and only one real snapshot of it exists from this session. What
+// this test proves is that the adapter and collector correctly turn this
+// real exposition format into a rate when the counter advances between
+// scrapes -- not what the true preemption rate was at capture time.
+func TestRealCaptureProducesPreemptionRate(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "runtime", "vllm", "testdata", "vllm_gpu_l4_kv_exhausted.txt"))
+	if err != nil {
+		t.Fatalf("reading real capture fixture: %v", err)
+	}
+	body := string(raw)
+
+	const originalLine = `vllm:num_preemptions_total{engine="0",model_name="facebook/opt-125m"} 53366.0`
+	if !strings.Contains(body, originalLine) {
+		t.Fatalf("fixture no longer contains the expected preemptions counter line; it may have been regenerated")
+	}
+	bumpedLine := `vllm:num_preemptions_total{engine="0",model_name="facebook/opt-125m"} 53410.0`
+
+	var serveBumped atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if serveBumped.Load() {
+			fmt.Fprint(w, strings.Replace(body, originalLine, bumpedLine, 1))
+		} else {
+			fmt.Fprint(w, body)
+		}
+	}))
+	defer srv.Close()
+
+	store := telemetry.NewStore()
+	c := newTestCollector(t, []Target{{
+		WorkloadName: "kv-exhausted", Runtime: telemetry.RuntimeVLLM, ModelName: "facebook/opt-125m", MetricsURL: srv.URL,
+	}}, store, testOptions())
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	c.now = func() time.Time { return now }
+
+	target := c.Targets()[0]
+	first, err := c.Scrape(context.Background(), target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The first scrape of a target never has a rate: there is no prior sample
+	// to take a delta against.
+	if first.PreemptionsPerSec.OK {
+		t.Errorf("first scrape reported a preemption rate; want unmeasured")
+	}
+	// Sanity-check the real capture's other fields parsed correctly through
+	// the full pipeline before we trust the second scrape's rate.
+	if first.RequestsRunning.Value != 84 {
+		t.Errorf("requests_running = %v, want 84 (from real capture)", first.RequestsRunning.Value)
+	}
+	if first.RequestsWaiting.Value != 16 {
+		t.Errorf("requests_waiting = %v, want 16 (from real capture)", first.RequestsWaiting.Value)
+	}
+	if first.WaitingForCapacity.Value != 16 {
+		t.Errorf("waiting_for_capacity = %v, want 16 (from real capture)", first.WaitingForCapacity.Value)
+	}
+
+	now = now.Add(10 * time.Second)
+	serveBumped.Store(true)
+	second, err := c.Scrape(context.Background(), target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !second.PreemptionsPerSec.OK {
+		t.Fatal("no preemption rate after two scrapes of a real capture")
+	}
+	if second.PreemptionsPerSec.Value != 4.4 {
+		t.Errorf("preemptions/sec = %v, want 4.4 (44 preemptions over 10s)", second.PreemptionsPerSec.Value)
 	}
 }
