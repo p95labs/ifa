@@ -224,15 +224,15 @@ Alpha. It works, it is tested, and it is honest about what it has not proven.
 | Area | Status |
 |---|---|
 | Prometheus exposition parsing (labels, histograms, counters) | Implemented, tested against fixtures and edge cases |
-| vLLM adapter | Implemented and validated against live vLLM 0.28.0 on the ARM64 CPU backend (`facebook/opt-125m`), with captured idle, loaded and capacity-queued states; **GPU-backed vLLM not yet validated** |
-| Triton adapter | Implemented from the documented metric surface; **not yet run against a live Triton server** |
-| DCGM adapter | Implemented and unit-tested; **not yet run against real hardware** |
+| vLLM adapter | Implemented and validated against live vLLM 0.28.0 — CPU backend (`facebook/opt-125m`, captured idle, loaded and capacity-queued) and an NVIDIA L4 under KV-cache exhaustion at 99.9% occupancy with the preemption counter active |
+| Triton adapter | Implemented and validated against live Triton 25.12 on the CPU backend, with captured idle, loaded and summary-latency states; **GPU-backed Triton not yet validated** |
+| DCGM adapter | Implemented and validated against a DCGM-compatible exporter on an NVIDIA L4; **NVIDIA's own dcgm-exporter not yet validated** |
 | Rule engine | Implemented, tested at boundaries, exercised end to end by the demo |
-| Kubernetes discovery (informers) | Implemented; **not yet exercised in CI against a real cluster** |
+| Kubernetes discovery (informers) | Implemented and exercised end to end in a real kind cluster in CI (Kubernetes 1.31) |
 | TimescaleDB history | Implemented, bounded and non-blocking; **no integration test** |
 | HTTP API | Implemented and tested |
 
-Live validation now covers vLLM 0.28.0 on the ARM64 CPU backend using `facebook/opt-125m`, including captured idle, loaded and capacity-queued states. The remaining runtime-validation gaps are GPU-backed vLLM, a live Triton server and DCGM on real GPU hardware. [docs/ROADMAP.md](docs/ROADMAP.md) tracks the remaining integration work.
+Live validation covers four boundaries: vLLM 0.28.0 on CPU and on an NVIDIA L4 under KV-cache exhaustion, Triton 25.12 on CPU, a DCGM-compatible exporter on that same L4, and the full Kubernetes path end to end in a real kind cluster in CI. Every capture is committed verbatim with its provenance. What remains unvalidated: NVIDIA's own dcgm-exporter, GPU-backed Triton, the counter-rate and queue-growth rules (the integration test serves a static fixture, so there are no deltas between scrapes), and the TimescaleDB history path. [docs/ROADMAP.md](docs/ROADMAP.md) tracks the rest.
 
 ## Known limitations
 

@@ -7,7 +7,7 @@ adapter has actually been validated.
 
 | Adapter | Implemented against | Tested against | Run against a live server |
 |---|---|---|---|
-| vLLM | `vllm/v1/metrics/loggers.py` (metric names, types, labels, histogram bucket boundaries) | Fixtures built from those definitions, including a V0-era payload and a two-model payload; plus three verbatim live captures (idle, loaded, capacity-queued) from vLLM 0.28.0 | **Yes** — vLLM 0.28.0, ARM64 CPU backend, `facebook/opt-125m`; GPU-backed vLLM not yet validated |
+| vLLM | `vllm/v1/metrics/loggers.py` (metric names, types, labels, histogram bucket boundaries) | Fixtures built from those definitions, including a V0-era payload and a two-model payload; plus three verbatim live captures (idle, loaded, capacity-queued) from vLLM 0.28.0 | **Yes** — vLLM 0.28.0 on ARM64 CPU (`facebook/opt-125m`) and on an NVIDIA L4 under KV-cache exhaustion |
 | Triton | The published metrics documentation | Fixtures for the default and summary-latency configurations; plus three verbatim live captures (idle, loaded, summary-latencies-enabled) from Triton 25.12 | **Yes** — Triton 25.12, ARM64 CPU backend, Python echo model; GPU-backed Triton not yet validated |
 | DCGM Exporter | Published field IDs | Fixtures including multi-GPU and partial payloads | **No** |
 
