@@ -154,7 +154,7 @@ Nineteen rules across seven families. Each has a permanent code, a severity, and
 ```bash
 helm install ifa deploy/helm/ifa \
   --namespace inference --create-namespace \
-  --set image.tag=v0.2.0 \
+  --set image.tag=0.1.0-alpha.1 \
   --set-json 'config.collector.targets=[{
       "name":"chat-llama3-8b",
       "namespace":"inference",
@@ -222,17 +222,17 @@ Every endpoint is a GET; the API cannot change anything. Unmeasured values seria
 Alpha. It works, it is tested, and it is honest about what it has not proven.
 
 | Area | Status |
-|---|---|
-| Prometheus exposition parsing (labels, histograms, counters) | Implemented, tested against fixtures and edge cases |
-| vLLM adapter | Implemented and validated against live vLLM 0.28.0 — CPU backend (`facebook/opt-125m`, captured idle, loaded and capacity-queued) and an NVIDIA L4 under KV-cache exhaustion at 99.9% occupancy with the preemption counter active |
-| Triton adapter | Implemented and validated against live Triton 25.12 on the CPU backend, with captured idle, loaded and summary-latency states; **GPU-backed Triton not yet validated** |
-| DCGM adapter | Implemented and validated against a DCGM-compatible exporter on an NVIDIA L4; **NVIDIA's own dcgm-exporter not yet validated** |
-| Rule engine | Implemented, tested at boundaries, exercised end to end by the demo |
-| Kubernetes discovery (informers) | Implemented and exercised end to end in a real kind cluster in CI (Kubernetes 1.31) |
-| TimescaleDB history | Implemented, bounded and non-blocking; **no integration test** |
-| HTTP API | Implemented and tested |
+| --- | --- |
+| Prometheus exposition parsing | Implemented and tested against fixtures, live captures, and edge cases |
+| vLLM adapter | Validated against live vLLM 0.28.0 on CPU and on one NVIDIA L4 under KV-cache exhaustion |
+| Triton adapter | Validated against live Triton 25.12 on CPU; GPU-backed Triton not yet validated |
+| DCGM adapter | Validated against a DCGM-compatible exporter on one NVIDIA L4; NVIDIA's own dcgm-exporter not yet validated |
+| Rule engine | Implemented, boundary-tested, exercised end to end by the demo and Kubernetes CI |
+| Kubernetes discovery | Validated end to end in a real kind cluster in CI using Kubernetes 1.31 |
+| Counter-rate / queue-growth rules | Implemented, but not yet validated against live time-separated deltas |
+| TimescaleDB history | Implemented, bounded, non-blocking; no integration test yet |
 
-Live validation covers four boundaries: vLLM 0.28.0 on CPU and on an NVIDIA L4 under KV-cache exhaustion, Triton 25.12 on CPU, a DCGM-compatible exporter on that same L4, and the full Kubernetes path end to end in a real kind cluster in CI. Every capture is committed verbatim with its provenance. What remains unvalidated: NVIDIA's own dcgm-exporter, GPU-backed Triton, the counter-rate and queue-growth rules (the integration test serves a static fixture, so there are no deltas between scrapes), and the TimescaleDB history path. [docs/ROADMAP.md](docs/ROADMAP.md) tracks the rest.
+Live validation currently covers vLLM 0.28.0 on CPU and one NVIDIA L4, Triton 25.12 on CPU, a DCGM-compatible exporter on the L4, and the full Kubernetes path in CI. Remaining validation gaps include GPU-backed Triton, NVIDIA's own dcgm-exporter, live-delta coverage for counter-rate and queue-growth rules, and the TimescaleDB integration path.
 
 ## Known limitations
 
