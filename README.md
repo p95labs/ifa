@@ -90,7 +90,7 @@ flowchart LR
   subgraph cluster["Kubernetes cluster"]
     vllm["vLLM pods<br/>/metrics"]
     triton["Triton pods<br/>/metrics"]
-    dcgm["DCGM Exporter<br/>/metrics"]
+    dcgm["DCGM-compatible exporter<br/>/metrics"]
     api["Kubernetes API<br/>deployments · pods · HPAs"]
   end
 
@@ -125,7 +125,7 @@ Dashed boxes are read-only: IFA issues GETs and watches, and holds no verb that 
 |---|---|
 | **vLLM** | running/waiting requests and *why* they are waiting, KV-cache utilisation, preemptions, TTFT / end-to-end / queue-time histograms, prompt and generation token counters, prefix-cache hit rate, finished-request reasons |
 | **Triton** | pending requests, success and failure counters by reason, GPU utilisation and memory, latency summaries when enabled |
-| **DCGM Exporter** | real GPU utilisation, framebuffer usage, temperature — the only source of these; no inference runtime reports them |
+| **DCGM-compatible exporter** | real GPU utilisation, framebuffer usage, temperature — the only source of these; no inference runtime reports them |
 | **Kubernetes** | desired/ready replicas, HPA ceilings, container restart counts |
 
 Metric names, units and version differences are documented in [docs/RUNTIMES.md](docs/RUNTIMES.md), along with what has and has not been validated against a live server.
