@@ -7,12 +7,29 @@ adapter has actually been validated.
 
 | Adapter | Implemented against | Tested against | Run against a live server |
 |---|---|---|---|
-| vLLM | `vllm/v1/metrics/loggers.py` (metric names, types, labels, histogram bucket boundaries) | Fixtures built from those definitions, including a V0-era payload and a two-model payload; plus three verbatim live captures (idle, loaded, capacity-queued) from vLLM 0.28.0 | **Yes** — vLLM 0.28.0 on ARM64 CPU (`facebook/opt-125m`) and on an NVIDIA L4 under KV-cache exhaustion |
+| vLLM | `vllm/v1/metrics/loggers.py` (metric names, types, labels, histogram bucket boundaries) | Fixtures built from those definitions, including a V0-era payload and a two-model payload; plus four verbatim live captures — three from CPU (idle, loaded, capacity-queued) and one from an NVIDIA L4 at ≈99.9% KV-cache occupancy | **Yes** — vLLM 0.28.0 on ARM64 CPU (`facebook/opt-125m`) and on one NVIDIA L4 under KV-cache exhaustion |
 | Triton | The published metrics documentation | Fixtures for the default and summary-latency configurations; plus three verbatim live captures (idle, loaded, summary-latencies-enabled) from Triton 25.12 | **Yes** — Triton 25.12, ARM64 CPU backend, Python echo model; GPU-backed Triton not yet validated |
-| DCGM Exporter | Published field IDs | Fixtures including multi-GPU and partial payloads | **No** |
+| DCGM Exporter | Published field IDs | Fixtures including multi-GPU and partial payloads; plus a matched pair of verbatim live captures (settled and refresh-lagged) from an NVIDIA L4 | **Yes** — a DCGM-*compatible* exporter on one NVIDIA L4; NVIDIA's official `dcgm-exporter` image not yet validated |
 
-Both vLLM and Triton adapters have been validated against live CPU-backed servers.
-DCGM has not. If you run it, `ifa check <url>` produces the report that would close it.
+All three adapters have now been run against a live endpoint. The gaps are
+specific, and they are not "unvalidated" in general:
+
+- **GPU-backed Triton** has not been run. Triton's live validation is CPU-only,
+  where the server publishes no `nv_gpu_*` families at all, so the
+  `nv_gpu_utilization` ×100 conversion is still unverified against a real reading.
+- **NVIDIA's official `dcgm-exporter`** has not been run. The DCGM validation
+  used a DCGM-compatible exporter bundled by the GPU host — a narrower field set
+  that happens to include every field the adapter reads. See
+  [`internal/runtime/dcgm/testdata/README.md`](../internal/runtime/dcgm/testdata/README.md).
+- **Multi-GPU behaviour** has not been validated on hardware. One NVIDIA L4 was
+  available; a single-GPU capture proves nothing about max-across-devices
+  aggregation, multi-GPU KV-cache pooling, or per-device attribution.
+- **Counter rates** have never been measured live. Every capture is a single
+  snapshot, so preemption, throughput and queue-growth rates remain
+  synthetic-only.
+
+If you run GPU-backed Triton or the official `dcgm-exporter`, `ifa check <url>`
+produces the report that would close the first two.
 
 ---
 
@@ -80,7 +97,7 @@ signal.
   across them and takes the maximum of utilisation gauges, because summing a
   percentage across engines is meaningless.
 
-### Live validation
+### Live validation — CPU backend
 
 The adapter was run against a real vLLM server with the following configuration:
 
@@ -121,17 +138,50 @@ Three verbatim `/metrics` payloads were captured:
 
 **KV-cache unit.** vLLM exposes `kv_cache_usage_perc` as a fraction where `1`
 means 100% usage. The adapter multiplies by 100 before storing. The live values
-above were low (under 3%), so high-KV-cache pressure was not exercised.
+above were low (under 3%) — the KV rules fire around 90% — so high-KV-cache
+pressure was not exercised by these captures. The GPU-backed run below does
+exercise it.
+
+### Live validation — GPU backend (one NVIDIA L4)
+
+A second run drove a GPU-backed server into genuine KV-cache exhaustion:
+
+- **Image:** `vllm/vllm-openai:v0.28.0`
+- **GPU:** one NVIDIA L4 (23034 MiB), driver 580.126.20, CUDA 13.0
+- **Platform:** JarvisLabs.ai GPU VM, Ubuntu 22.04.5
+- **Model:** `facebook/opt-125m`
+- **Flags:** `--dtype half --gpu-memory-utilization 0.8 --max-model-len 2048
+  --num-gpu-blocks-override 1024` — the KV cache was deliberately constrained to
+  1024 blocks so exhaustion is reachable without exotic prompt lengths
+- **Load:** continuous refill, not a one-shot batch — 100 worker threads each
+  issuing a new request the moment the previous one completed, with a fixed
+  223-token prompt and `ignore_eos: true` so every request ran to its full
+  `max_tokens`. A batch drains as requests finish; continuous refill sustains
+  pressure. The capture was taken 13 seconds into the run.
+
+| Fixture | State | Key observed values |
+|---|---|---|
+| `testdata/vllm_gpu_l4_kv_exhausted.txt` | KV cache exhausted under sustained load | requests_running=84, requests_waiting=16, all 16 `reason="capacity"`, raw `kv_cache_usage_perc`≈0.99902 (**≈99.9%**), `num_preemptions_total`=53366 and climbing |
+
+This is the only capture in the repository showing KV-cache saturation,
+capacity-driven queueing and active preemption together in one payload, taken
+against real GPU hardware rather than synthesized. GPU utilisation for the same
+session was captured separately from a DCGM-compatible exporter at
+`DCGM_FI_DEV_GPU_UTIL = 100`.
 
 **What this validation does not establish:**
 
-- GPU-backed vLLM behavior
-- Real device-side GPU KV-cache behavior
+- **Multi-GPU behaviour.** One L4 is one card. A single-GPU capture proves
+  nothing about max-across-devices aggregation or multi-GPU KV-cache pooling.
+- **A preemption rate.** `num_preemptions_total` was observed nonzero and
+  climbing, which is the signal that matters, but a *rate* needs two
+  time-separated scrapes and none was measured. The absolute value also includes
+  preemptions from earlier runs in the same long-lived vLLM process.
+- Sustained exhaustion over long windows, or recovery behaviour after load drops
 - Live V0 `gpu_cache_usage_perc` behavior
-- Preemption behavior — `vllm:num_preemptions_total` was present but preemption was not deliberately triggered
-- DCGM on real GPU hardware
-- Live Triton behavior
-- Full Kubernetes discovery → scrape → recommendation integration
+- NVIDIA's official `dcgm-exporter` image — the GPU utilisation above came from
+  a DCGM-compatible exporter bundled by the host
+- GPU-backed Triton behavior
 
 ### Requirements
 
@@ -246,7 +296,10 @@ cannot be verified without GPU hardware.
 - Multi-model label isolation on a live server
 - Dynamic-batcher behavior
 - TensorRT, PyTorch, or ONNX backend behavior
-- Full Kubernetes discovery → scrape → recommendation integration
+
+The full Kubernetes discovery → scrape → recommendation path *is* validated, but
+with the vLLM adapter: the kind integration test serves a vLLM capture. No
+Triton target has been run through a cluster.
 
 ---
 
@@ -273,6 +326,49 @@ the utilisation IFA attributes to a target is the node's busiest GPU, which may
 belong to something else. On dedicated GPU nodes — the common arrangement for
 serving — the two coincide. Per-pod attribution would need DCGM's
 Kubernetes-aware labels and pod-to-GPU mapping, which is on the roadmap.
+
+### Live validation — one NVIDIA L4, via a DCGM-compatible exporter
+
+- **GPU:** one NVIDIA L4 (23034 MiB), driver 580.126.20, CUDA 13.0
+- **Platform:** JarvisLabs.ai GPU VM, Ubuntu 22.04.5
+- **Exporter:** `/opt/jarvis/guest-monitor/bin/dcgm-exporter` — JarvisLabs'
+  bundled DCGM-compatible exporter, **not** NVIDIA's official `dcgm-exporter`
+  container image. It exposes 25 `DCGM_FI_DEV_*` series, a narrower set than the
+  canonical image; every field the adapter reads (`GPU_UTIL`, `MEM_COPY_UTIL`,
+  `FB_USED`, `FB_FREE`) was present and correctly formatted.
+- **GPU activity:** vLLM 0.28.0 serving `facebook/opt-125m` under sustained
+  concurrent load — the same session as the vLLM GPU capture above
+
+Two verbatim payloads were captured as a matched pair:
+
+| Fixture | State | Key observed values |
+|---|---|---|
+| `testdata/dcgm_l4_under_load_settled.txt` | Under sustained load, exporter settled | `DCGM_FI_DEV_GPU_UTIL`=100, `FB_USED`=1550 MiB |
+| `testdata/dcgm_l4_refresh_lag_stale.txt` | Identical load, exporter not yet settled | `DCGM_FI_DEV_GPU_UTIL`=0, `FB_USED`=1548 MiB |
+
+**This exporter reads up to twenty seconds late.** Dense polling measured roughly
+**18–20 seconds** between a real GPU state change (idle → 100%) and that change
+appearing in `DCGM_FI_DEV_GPU_UTIL`. Once settled the reading was stable across
+127 consecutive samples at ~0.8s intervals. The framebuffer figure was in the
+same ~1.5 GiB range in both captures, confirming the GPU was genuinely busy in
+both — only the utilisation reading was stale. This was confirmed by reading the
+raw `/metrics` endpoint directly, independent of IFA, so it is a property of the
+exporter rather than of IFA's parser or collector.
+
+The operational consequence: **size `collector.interval` and `sustain_for`
+comfortably above your DCGM source's own refresh lag.** An observation window
+shorter than the lag reports `gpu_utilization_percent = 0` while the GPU is
+saturated, which is exactly the condition `IFA-CAP-002` ("queueing while the GPU
+is idle") looks for. The ~18–20s figure is specific to this exporter and must
+not be assumed to generalise; NVIDIA's own `dcgm-exporter` has not been measured.
+
+**What this validation does not establish:**
+
+- Behaviour against NVIDIA's official `dcgm-exporter` container image
+- Multi-GPU aggregation on real hardware — only one physical GPU was available,
+  so the max-across-devices logic is still fixture-only
+- GPU temperature or SM clock behaviour under real thermal load
+- Refresh characteristics of any other DCGM source
 
 ---
 

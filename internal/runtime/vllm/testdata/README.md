@@ -146,5 +146,15 @@ end. Together they do not establish:
 - DCGM behavior on the official NVIDIA `dcgm-exporter` image (this session's
   DCGM capture, in `internal/runtime/dcgm/testdata/`, used a JarvisLabs-bundled
   DCGM-compatible exporter -- see that directory's README for the distinction)
-- Live Triton behavior
-- Full Kubernetes discovery to scrape to recommendation integration
+- Any counter *rate*. Every capture here is a single snapshot, so
+  `num_preemptions_total` is only ever read as a value, never differenced
+  across two scrapes. The preemption rate that `IFA-KV-001` fires on remains
+  synthetic-only.
+- GPU-backed Triton behavior
+
+Two things that *are* established elsewhere, and are listed here only because
+earlier revisions of this file claimed otherwise: live Triton behavior is
+covered by the CPU captures in `internal/runtime/triton/testdata/`, and the full
+Kubernetes discovery -> scrape -> recommendation path is covered by
+`scripts/kind-integration.sh`, which serves `vllm_v1_queued.txt` from a pod in a
+real kind cluster on every CI run.
