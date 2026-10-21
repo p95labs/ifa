@@ -8,8 +8,9 @@ metrics capture over HTTP, and asserts the following end-to-end path:
 
 ```
 vllm_v1_queued.txt  →  busybox httpd  →  collector scrape
-  →  vLLM adapter  →  telemetry store  →  recommender (Sustained())
-  →  /api/v1/recommendations  →  IFA-LAT-003 with evidence
+  →  vLLM adapter  →  telemetry store  →  recommender (e.Span())
+  →  /api/v1/recommendations  →  IFA-LAT-002 with evidence
+                              →  IFA-LAT-003 suppressed
 ```
 
 Assertions made (in order):
@@ -63,9 +64,16 @@ CI-speed-specific values are overridden.
 
 | Key | Integration value | Production default | Reason |
 |---|---|---|---|
+| `image.repository` / `image.tag` | `ifa` / `integration-test` | `ghcr.io/p95labs/ifa` / chart `appVersion` | The locally built image, not the published one |
 | `image.pullPolicy` | `Never` | `IfNotPresent` | Image is loaded via `kind load`, not pulled from a registry |
 | `collector.interval` | `5s` | `15s` | Reduces wall-clock wait to fill the window; rule semantics unchanged |
+| `collector.timeout` | `4s` | `10s` | Must stay below `interval` to satisfy the collector's startup check |
+| `logging.level` / `format` | `debug` / `text` | `info` / `json` | Readable pod logs when an assertion fails |
 | `recommender.thresholds.sustain_for` | `10s` | `45s` | Reduces wall-clock wait; `e.Span()` reaches 10 s after the 3rd cycle |
+
+Only `collector.interval`, `collector.timeout` and `sustain_for` affect timing,
+and none of them affects a diagnosis. Every threshold the rules compare against
+is inherited unchanged.
 
 ## Known limitations
 
@@ -98,7 +106,7 @@ GPU memory, and GPU-dependent rules (`IFA-CAP-001`, `IFA-CAP-002`,
 
 ## CI status
 
-The `kind-integration` job is present in `.github/workflows/ci.yml` and runs on
-every push and pull request. It is **not** currently a required branch-protection
-check. The team intends to observe it across several PRs for stability before
-promoting it to required status.
+The `kind-integration` job is present in `.github/workflows/ci.yml`, runs on
+every push and pull request, and is a **required** branch-protection check on
+`main` (registered as `Kind integration test`). A pull request cannot merge while
+it is failing.
