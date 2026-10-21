@@ -81,7 +81,7 @@ You should have both; IFA reads the same data. The difference is what happens af
 | Missing metrics | silence, indistinguishable from health | an explicit "telemetry incomplete" finding |
 | Output | "value > threshold" | rule code, evidence, threshold, and a suggested action |
 
-The honest boundary: IFA has no query language, no long-range history worth speaking of, no alerting pipeline, and no dashboards. It is a diagnostic layer that sits beside your monitoring stack, not a replacement for it. If your question is "what did p95 look like last Tuesday", use Prometheus.
+The honest boundary: IFA has no query language, no long-range history worth speaking of, and no dashboards. It will POST a finding to a webhook on a state transition — one alert when a condition starts, one when it clears, deduplicated, behind a bounded queue — and that is the whole of it. There is no routing, no on-call schedule, no escalation, no silences, no grouping policy. Alertmanager and PagerDuty do those things and IFA does not try to. It is a diagnostic layer that sits beside your monitoring stack, not a replacement for it. If your question is "what did p95 look like last Tuesday", use Prometheus.
 
 ## Architecture
 
@@ -100,6 +100,7 @@ flowchart LR
     store["Telemetry store<br/>bounded in-memory window"]
     engine["Rule engine<br/>cross-signal, sustained"]
     http["HTTP API + /metrics"]
+    alerts["Webhook sender<br/>transitions only, bounded queue"]
   end
 
   vllm -- "GET" --> collector
@@ -112,6 +113,7 @@ flowchart LR
 
   http --> cli["ifa CLI"]
   http --> prom["Prometheus / dashboards"]
+  engine -. "optional, on transition" .-> alerts --> hook[("Webhook endpoint")]
 
   classDef ro stroke-dasharray: 4 3;
   class vllm,triton,dcgm,api ro;
@@ -132,7 +134,7 @@ Metric names, units and version differences are documented in [docs/RUNTIMES.md]
 
 ## Rules
 
-Nineteen rules across seven families. Each has a permanent code, a severity, and a documented trigger:
+Nineteen rules across seven families, each with a permanent code, a severity, and a documented trigger. Ten of the nineteen:
 
 | Code | Fires when | Severity |
 |---|---|---|
@@ -154,7 +156,7 @@ Nineteen rules across seven families. Each has a permanent code, a severity, and
 ```bash
 helm install ifa deploy/helm/ifa \
   --namespace inference --create-namespace \
-  --set image.tag=0.1.0-alpha.1 \
+  --set image.tag=0.2.0-alpha.1 \
   --set-json 'config.collector.targets=[{
       "name":"chat-llama3-8b",
       "namespace":"inference",
@@ -211,7 +213,7 @@ Every endpoint is a GET; the API cannot change anything. Unmeasured values seria
 
 - **Read-only by construction.** RBAC grants `get`, `list`, `watch` on deployments, pods and HPAs, and nothing else. There is no code path that writes to the Kubernetes API. Every HTTP handler is a GET, enforced in one place.
 - **No prompt or response data.** IFA reads Prometheus counters and gauges. Request and response bodies never enter the process.
-- **No outbound connections** beyond the scrape targets you configure and the Kubernetes API. No licence check, no telemetry, no update check.
+- **No outbound connections** beyond the scrape targets you configure, the Kubernetes API, and the alerting webhook if you enable one. No licence check, no telemetry, no update check.
 - **Runs unprivileged**: non-root, read-only root filesystem, all capabilities dropped, seccomp `RuntimeDefault`.
 - **The API is unauthenticated.** This is the significant limitation. It exposes operational metadata about your inference fleet, and the only access control is network-level. Restrict it with a NetworkPolicy or an authenticating proxy.
 
@@ -227,12 +229,13 @@ Alpha. It works, it is tested, and it is honest about what it has not proven.
 | vLLM adapter | Validated against live vLLM 0.28.0 on CPU and on one NVIDIA L4 under KV-cache exhaustion |
 | Triton adapter | Validated against live Triton 25.12 on CPU; GPU-backed Triton not yet validated |
 | DCGM adapter | Validated against a DCGM-compatible exporter on one NVIDIA L4; NVIDIA's own dcgm-exporter not yet validated |
-| Rule engine | Implemented, boundary-tested, exercised end to end by the demo and Kubernetes CI |
+| Rule engine | Implemented, boundary-tested, exercised end to end by the demo and in a real cluster in CI at shipped default thresholds, including suppression |
 | Kubernetes discovery | Validated end to end in a real kind cluster in CI using Kubernetes 1.31 |
+| Webhook alerting | Implemented — transition-based, deduplicated, bounded queue; no live endpoint integration test |
 | Counter-rate / queue-growth rules | Implemented, but not yet validated against live time-separated deltas |
 | TimescaleDB history | Implemented, bounded, non-blocking; no integration test yet |
 
-Live validation currently covers vLLM 0.28.0 on CPU and one NVIDIA L4, Triton 25.12 on CPU, a DCGM-compatible exporter on the L4, and the full Kubernetes path in CI. Remaining validation gaps include GPU-backed Triton, NVIDIA's own dcgm-exporter, live-delta coverage for counter-rate and queue-growth rules, and the TimescaleDB integration path.
+Live validation currently covers vLLM 0.28.0 on CPU and on one NVIDIA L4 at ≈99.9% KV-cache occupancy with capacity-driven queueing and active preemption, Triton 25.12 on CPU, a DCGM-compatible exporter on the L4, and the full Kubernetes path in CI. Four things that are deliberately *not* claimed: one L4 is one card and says nothing about multi-GPU behaviour; the GPU captures are snapshots, so no counter rate — preemptions, throughput, queue growth — has ever been measured live; the DCGM exporter was a DCGM-*compatible* one bundled by the GPU host, not NVIDIA's official image; and GPU-backed Triton has not been run at all. The TimescaleDB path has no integration test.
 
 ## Known limitations
 
@@ -240,6 +243,8 @@ Live validation currently covers vLLM 0.28.0 on CPU and one NVIDIA L4, Triton 25
 - One instance holds telemetry in memory; running two replicas gives you two independent views, not a shared one. The chart uses `Recreate` for this reason.
 - Percentiles from histogram-backed runtimes are interpolated from bucket boundaries and inherit their resolution. A p95 that lands in vLLM's `+Inf` bucket is reported as the largest finite boundary, which understates it.
 - Without a DCGM endpoint, GPU utilisation and memory are simply not measured, and the rules that need them do not run. IFA reports that rather than substituting a proxy.
+- **A DCGM endpoint can read late.** The exporter measured on an L4 lagged real GPU state by 18–20 seconds. A `collector.interval` or `sustain_for` shorter than your exporter's refresh lag will report a saturated GPU as idle, which is precisely what `IFA-CAP-002` looks for. Size both above it. The figure is specific to that exporter; measure your own.
+- GPU attribution is per-node, not per-pod. A DCGM endpoint reports the GPUs on a node, so on a node running several inference workloads the utilisation attributed to a target may belong to something else. Trustworthy on dedicated GPU nodes.
 - vLLM exposes no failure counter, so no error rate is derived for vLLM targets. The abort share is reported instead.
 - Thresholds are global, not per-workload. A batch pipeline and a chat endpoint currently share one definition of "slow".
 
@@ -253,4 +258,4 @@ make verify   # gofmt, vet, race tests, chart lint
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+Apache 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).

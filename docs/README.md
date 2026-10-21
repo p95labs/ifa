@@ -31,6 +31,7 @@ Short records of the choices that shaped the design, with the reasoning:
 - [0003 — TimescaleDB optional and non-blocking](adr/0003-optional-timescaledb.md)
 - [0004 — Deterministic rules, not learned models](adr/0004-deterministic-rules.md)
 - [0005 — Measurements are optional values](adr/0005-optional-measurements.md)
+- [0006 — Alert deduplication via state transitions](adr/0006-alert-deduplication.md)
 
 ## Contributing
 

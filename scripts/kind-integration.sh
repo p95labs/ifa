@@ -52,7 +52,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 KIND_CLUSTER="${KIND_CLUSTER:-ifa-integration}"
 # Pinned by both tag and digest for build reproducibility.
 # kind v0.24.0 release notes: https://github.com/kubernetes-sigs/kind/releases/tag/v0.24.0
-# Matches the project's k8s.io/client-go v0.31.0 (Kubernetes 1.31) dependency.
+# The node version is pinned independently of the k8s.io/client-go version in
+# go.mod, which dependabot moves. client-go is supported against servers a few
+# minor releases either side, and the API surface IFA uses -- apps/v1
+# Deployments, core/v1 Pods, autoscaling/v2 HPAs -- has been stable throughout,
+# so testing against an older server than the client is deliberate rather than
+# stale. Bump it when there is a reason, not to match go.mod.
 KIND_NODE_IMAGE="kindest/node:v1.31.0@sha256:53df588e04085fd41ae12de0c3fe4c72f7013bba32a20e7325357a1ac94ba865"
 IFA_IMAGE="${IFA_IMAGE:-ifa:integration-test}"
 # busybox-fixture:1.36 is built locally as a single-platform image so that

@@ -5,9 +5,15 @@
 ```bash
 helm install ifa deploy/helm/ifa \
   --namespace inference --create-namespace \
-  --set image.tag=v0.2.0 \
+  --set image.tag=0.2.0-alpha.1 \
   --values my-values.yaml
 ```
+
+**The image tag has no `v` prefix.** The git tag is `v0.2.0-alpha.1`; the
+published GHCR tag is `0.2.0-alpha.1`. Passing `image.tag=v0.2.0-alpha.1`
+produces an `ImagePullBackOff`. Leaving `image.tag` unset falls back to the
+chart's `appVersion`, which is already the correct form — pin it anyway, so an
+upgrade of the chart does not silently change the rule set.
 
 A minimal `my-values.yaml`:
 
@@ -44,7 +50,8 @@ runtime that does not exist is rejected before it reaches the cluster.
 | `rbac.scope` | `namespace` | `cluster` only when watching all namespaces — see [RBAC_PERMISSIONS.md](RBAC_PERMISSIONS.md) |
 | `networkPolicy.enabled` | `false` | Read the section below before enabling |
 | `serviceMonitor.enabled` | `false` | Needs the Prometheus Operator CRDs |
-| `database.existingSecret` | `""` | Secret holding the DSN under `database.secretKey` |
+| `database.existingSecret` | `""` | Secret holding the DSN under `database.secretKey`. Set `config.database.enabled` too |
+| `alerting.existingSecret` | `""` | Secret holding the webhook URL under `alerting.secretKey`. Set `config.alerting.enabled` too. The URL *is* the credential for Slack, Teams and PagerDuty — do not put it in `config.alerting.webhook_url`, which is rendered into a ConfigMap |
 | `podDisruptionBudget.enabled` | `false` | Only meaningful with `replicaCount > 1` |
 
 ### Replicas
@@ -110,27 +117,32 @@ update check. The only things that need to cross the boundary are the container
 image and the chart.
 
 ```bash
-./scripts/package-offline.sh v0.2.0
+./scripts/package-offline.sh v0.2.0-alpha.1
 ```
 
 produces, in `dist/`:
 
-- `ifa-image-v0.2.0.tar` — `docker save` output
-- `ifa-0.2.0.tgz` — the packaged chart
+- `ifa-image-v0.2.0-alpha.1.tar` — `docker save` output
+- `ifa-0.2.0-alpha.1.tgz` — the packaged chart (the script strips the leading
+  `v`, because Helm chart versions must be bare SemVer)
 - `SHA256SUMS`
+
+Note that this script *builds* the image locally, so it tags it exactly as you
+asked — `v` prefix included. That is why `image.tag` below keeps the `v` while
+the registry install above does not: the tag you load is the tag you set.
 
 On the target:
 
 ```bash
-docker load -i ifa-image-v0.2.0.tar
-# or, for containerd:  ctr -n k8s.io images import ifa-image-v0.2.0.tar
+docker load -i ifa-image-v0.2.0-alpha.1.tar
+# or, for containerd:  ctr -n k8s.io images import ifa-image-v0.2.0-alpha.1.tar
 
 # Push to an internal registry, then:
-helm install ifa ifa-0.2.0.tgz \
+helm install ifa ifa-0.2.0-alpha.1.tgz \
   --namespace inference --create-namespace \
   --set image.registry=registry.internal.example.com \
   --set image.repository=ghcr.io/p95labs/ifa \
-  --set image.tag=v0.2.0 \
+  --set image.tag=v0.2.0-alpha.1 \
   --values my-values.yaml
 ```
 

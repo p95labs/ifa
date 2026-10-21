@@ -72,7 +72,7 @@ confirming that the ConfigMap you edited is the one running.
   "status": "ok",
   "uptime_seconds": 261,
   "config": {
-    "version": "v0.2.0",
+    "version": "v0.2.0-alpha.1",
     "commit": "f863b6240628",
     "collector_mode": "demo",
     "target_count": 7,
