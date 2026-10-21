@@ -15,8 +15,12 @@ permissions:
   contents: read
 
 env:
-  # Must match the `go` directive in go.mod.
-  GO_VERSION: "1.25"
+  # The `go` directive in go.mod is the language floor (1.26). This is the
+  # toolchain CI builds and scans with, and it is deliberately higher: standard
+  # library vulnerabilities are fixed in toolchain patch releases, so pinning
+  # the floor here would make the vulnerability scan fail for something no
+  # dependency bump can fix. Tracking the latest 1.27 patch picks those up.
+  GO_VERSION: "1.27"
   GOTOOLCHAIN: local
 
 jobs:

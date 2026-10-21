@@ -4,7 +4,10 @@
 # and having it in the image means `kubectl exec` is not the only way to inspect
 # a running instance from inside the cluster.
 
-FROM golang:1.25-alpine AS build
+# Tracks the latest 1.27 patch rather than the go.mod floor (1.26): the binary
+# shipped in this image embeds the standard library it was built with, so a
+# toolchain patch is the only way to carry a net/http or crypto/tls fix.
+FROM golang:1.27-alpine AS build
 
 # git is needed for the VCS stamps the toolchain embeds, which is where the
 # build's commit hash in /api/v1/healthz comes from.

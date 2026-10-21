@@ -17,9 +17,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Kept in step with ci.yml's GO_VERSION: the released binaries embed the
+      # standard library they were built with, so this is what determines
+      # whether a published artifact carries a known net/http or crypto/tls fix.
       - uses: actions/setup-go@v7
         with:
-          go-version: "1.25"
+          go-version: "1.27"
 
       # Cross-compiled by hand rather than with a release framework: two
       # binaries and four platforms do not need one, and a tool that is not
