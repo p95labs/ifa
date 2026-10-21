@@ -4,10 +4,22 @@ Notable changes per release. This project follows [semantic
 versioning](https://semver.org/) with the caveat that, before 1.0, minor versions
 may break things — and this release does.
 
-## [0.2.0] — unreleased
+## [0.2.0-alpha.1] — 2026-10-21
 
 A correctness release. The headline is that the vLLM integration did not work
-against a real vLLM server, and now does.
+against a real vLLM server, and now does — verified against one, on CPU and on
+a GPU.
+
+Artifacts for this release:
+
+| | |
+|---|---|
+| Git tag | `v0.2.0-alpha.1` |
+| Container image | `ghcr.io/p95labs/ifa:0.2.0-alpha.1` — note: **no `v` prefix**, unlike the git tag |
+| Platforms | `linux/amd64`, `linux/arm64` |
+| Chart `version` / `appVersion` | `0.2.0-alpha.1` |
+| Binary archives | `ifa_v0.2.0-alpha.1_{linux,darwin}_{amd64,arm64}.tar.gz`, each containing `control-plane` and `ifa` |
+| Checksums | `SHA256SUMS` |
 
 ### Fixed
 
@@ -84,17 +96,64 @@ against a real vLLM server, and now does.
 - Pod and container `securityContext`, a config checksum annotation, NOTES.txt,
   `values.schema.json`, an optional ServiceMonitor and PodDisruptionBudget, and
   namespace-scoped RBAC by default.
+- **Webhook alerting.** Findings are optionally POSTed to a webhook endpoint on
+  *state transitions* — one alert when a condition starts, one when it clears —
+  rather than on every evaluation. Delivery runs behind a single writer and a
+  bounded queue, so a slow or dead endpoint cannot stall collection; overflow is
+  dropped and counted. Filtered by `min_severity` (default `warning`). The URL is
+  the credential for Slack, Teams and PagerDuty alike, so the chart takes it from
+  a Secret (`alerting.existingSecret`) rather than the ConfigMap, and the startup
+  log redacts it. This is webhook delivery, not an alerting platform: no routing,
+  no escalation, no silences, no grouping. See
+  [ADR 0006](docs/adr/0006-alert-deduplication.md) and
+  [docs/OPERATIONS.md](docs/OPERATIONS.md).
 - CI covering gofmt, vet, race tests, a demo smoke test, chart lint plus
-  kubeconform, a container build, shellcheck and govulncheck.
-- ADRs for the five decisions that shape the design.
+  kubeconform, a container build, shellcheck, govulncheck, and an end-to-end
+  kind cluster integration test. All seven jobs are required branch-protection
+  checks on `main`.
+- ADRs for the six decisions that shape the design.
 - **Triton live validation.** The Triton adapter was run against a real
   Triton 25.12 server (ARM64 CPU backend, Python echo model). Three verbatim
   `/metrics` payloads were captured (idle, post-traffic, summary-latencies-enabled)
   and are stored in `internal/runtime/triton/testdata/`. `TestCapturedPayload`
   asserts that GPU fields are unmeasured (`OK == false`) on a CPU-only server, that
   0 lines are unparseable, and that summary-latency percentiles match the raw
-  quantile values in the capture. See `docs/RUNTIMES.md` for the full validation
-  scope and limitations.
+  quantile values in the capture. GPU-backed Triton remains unvalidated. See
+  `docs/RUNTIMES.md` for the full validation scope and limitations.
+- **Kubernetes integration test.** `scripts/kind-integration.sh` installs the
+  chart into a real kind cluster (Kubernetes 1.31), serves a committed vLLM
+  capture from a busybox httpd pod, and asserts the full path — informer
+  discovery, in-cluster scrape, parse, sustained evaluation, suppression, REST
+  response — with six assertions at shipped default thresholds. It asserts
+  `IFA-LAT-002` fires with `ttft_p95_ms ≈ 32 000` against the stock
+  `threshold = 1000`, and that `IFA-LAT-003` is *absent*, which is what proves
+  suppression works outside a unit test. Only collection interval and sustain
+  window are overridden, purely for CI wall-clock.
+- **GPU-backed vLLM and DCGM validation (one NVIDIA L4).** vLLM 0.28.0 was run
+  on an NVIDIA L4 with the KV cache deliberately constrained and driven into
+  genuine exhaustion under continuous-refill load: the capture shows
+  `kv_cache_usage_perc ≈ 0.999` (**≈99.9%**), 84 requests running, 16 waiting and
+  all 16 labelled `reason="capacity"`, with `num_preemptions_total` nonzero and
+  climbing. GPU utilisation from the same session was captured at
+  `DCGM_FI_DEV_GPU_UTIL = 100`. Until this, the KV rules — which fire around 90%
+  — could only be evaluated against synthetic data, because the highest
+  occupancy reachable on CPU was 2.86%. Captures are committed verbatim in
+  `internal/runtime/vllm/testdata/` and `internal/runtime/dcgm/testdata/` with
+  checksums and full provenance, and are asserted by regression tests.
+
+  Four things this deliberately does not claim: one L4 is one card, so nothing
+  is established about multi-GPU aggregation or KV-cache pooling; the captures
+  are snapshots, so the preemption *rate* was never measured even though the
+  counter was seen climbing; the exporter was a DCGM-*compatible* one bundled by
+  the GPU host, **not** NVIDIA's official `dcgm-exporter` image; and GPU-backed
+  Triton was not run.
+- **A measured DCGM refresh lag.** The exporter above was measured reading
+  18–20 seconds behind real GPU state, confirmed by polling its raw `/metrics`
+  independently of IFA. A matched pair of captures — one stale, one settled,
+  under identical load — is committed as fixtures. The operational consequence
+  is documented: size `collector.interval` and `sustain_for` above your
+  exporter's refresh lag, or a saturated GPU reads as idle and `IFA-CAP-002`
+  misfires.
 
 ### Changed
 
@@ -107,9 +166,18 @@ against a real vLLM server, and now does.
   unknown keys are now a startup error rather than being silently ignored.
   Existing config files need updating.
 - Telemetry retention is bounded by both sample count and age.
-- The Go floor moved from 1.25 to 1.23, and CI, `go.mod` and the Dockerfile now
-  agree — they previously specified three different versions, so CI on `main`
-  could not build the project.
+- **The Go version is now stated once and agreed everywhere.** `go.mod`, the CI
+  `GO_VERSION`, the release workflow and the Dockerfile previously specified
+  three different versions, so CI on `main` could not build the project. The
+  floor is now 1.25 and all four match.
+- **The repository and Go module moved to `github.com/p95labs/ifa`.** Imports,
+  the chart's `home`/`sources`, the image repository (`ghcr.io/p95labs/ifa`) and
+  every documentation link were updated. The former paths are not redirected
+  beyond GitHub's own repository redirect.
+- `k8s.io/{api,apimachinery,client-go}` moved to v0.35.0. The kind integration
+  test deliberately stays on a Kubernetes 1.31 node — client-go is supported
+  against servers either side, and the API surface IFA uses has been stable
+  throughout.
 
 ### Removed
 
@@ -143,6 +211,14 @@ against a real vLLM server, and now does.
 The unversioned API paths (`/telemetry`, `/recommendations`, `/workloads`,
 `/healthz`) still work and still return bare arrays.
 
-## [0.1.0] — 2026-08
+## [0.1.0-alpha.1] — 2026-09-09
 
-Initial public alpha.
+First published release: binary archives for linux/amd64, linux/arm64,
+darwin/amd64 and darwin/arm64 with SHA256 checksums, plus multi-arch
+(linux/amd64, linux/arm64) container images on GHCR. Chart and `appVersion`
+both `0.1.0-alpha.1`.
+
+## [0.1.0-alpha] — 2026-08-01
+
+Initial public alpha. Tagged only; no release artifacts were published for this
+tag.

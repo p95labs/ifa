@@ -156,7 +156,7 @@ Nineteen rules across seven families, each with a permanent code, a severity, an
 ```bash
 helm install ifa deploy/helm/ifa \
   --namespace inference --create-namespace \
-  --set image.tag=0.1.0-alpha.1 \
+  --set image.tag=0.2.0-alpha.1 \
   --set-json 'config.collector.targets=[{
       "name":"chat-llama3-8b",
       "namespace":"inference",
