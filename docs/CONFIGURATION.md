@@ -28,14 +28,18 @@ Only the values that genuinely differ per deployment:
 | Variable | Overrides |
 |---|---|
 | `IFA_DATABASE_DSN` | `database.dsn` |
+| `IFA_ALERTING_WEBHOOK_URL` | `alerting.webhook_url` |
 | `IFA_LOG_LEVEL` | `logging.level` |
 | `IFA_LOG_FORMAT` | `logging.format` |
 | `IFA_ADDRESS` | `server.address` |
 | `IFA_CLUSTER_NAME` | `cluster_name` |
 
-The DSN is here because it carries a password and belongs in a Secret rather
-than in the ConfigMap the rest of the configuration lives in. Everything else
-stays in the file, where it can be reviewed in a pull request.
+The DSN and the webhook URL are here because both *are* credentials — the DSN
+carries a password, and Slack, Teams and PagerDuty all embed the token in the
+webhook path — so both belong in a Secret rather than in the ConfigMap the rest
+of the configuration lives in. The chart wires them from
+`database.existingSecret` and `alerting.existingSecret`. Everything else stays in
+the file, where it can be reviewed in a pull request.
 
 ## Scrape targets
 

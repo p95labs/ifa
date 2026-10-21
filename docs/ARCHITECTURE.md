@@ -6,10 +6,15 @@
 number of explained, checkable diagnoses; do it without any ability to change
 what it observes; and be usable by someone who has not read the source.
 
-**Non-goals.** IFA is not a metrics store, a query engine, an alerting pipeline,
+**Non-goals.** IFA is not a metrics store, a query engine, an alerting platform,
 or a dashboard, and it does not remediate. Those exist and are good. IFA is the
 layer that decides *which* problem you have, and it assumes Prometheus is doing
 the rest.
+
+It does POST findings to a webhook on a state transition, which is delivery, not
+alerting: there is no routing, no escalation, no on-call schedule, no silences
+and no grouping policy. Alertmanager and PagerDuty own those. See
+[ADR 0006](adr/0006-alert-deduplication.md).
 
 ## Components
 
@@ -27,6 +32,7 @@ internal/telemetry     the shared measurement model and the in-memory store
 internal/recommender   rule registry, evaluation, suppression
 internal/k8s           workload discovery via shared informers
 internal/api           read-only HTTP API
+internal/alerting      optional webhook delivery on finding transitions
 internal/metrics       IFA's own operational metrics
 internal/storage/timescale   optional durable history
 internal/demo          simulated inference fleet for the demo and the e2e test
@@ -56,6 +62,14 @@ runs the rule set against the current store. Rules are cheap — the benchmark
 covers fifty workloads with two minutes of history each — and evaluating on
 demand means a finding always reflects the newest telemetry rather than whenever
 the last background pass happened to run.
+
+When webhook alerting is enabled there is one exception: the control plane also
+evaluates on the collection interval, so that a transition can be noticed
+without anyone having called the API. The sender compares each cycle's findings
+against the previous set by stable ID and delivers only the differences — one
+alert when a condition appears, one when it clears. Everything else is dropped,
+which is why a condition firing for an hour produces two alerts and not two
+hundred.
 
 ## Concurrency model
 
@@ -94,6 +108,7 @@ looks fine".
 | Kubernetes API unavailable | Discovery is skipped with a warning; scraping and diagnosis continue; scaling rules stay dormant. Startup is *not* refused. |
 | Database unavailable at startup | Startup fails. Enabling history and silently not writing it is worse than a clear failure. |
 | Database fails later | Writes are dropped and counted in `ifa_database_dropped_total`. Diagnostics are unaffected — the rule engine only reads memory. |
+| Alerting webhook slow or down | Two delivery attempts (one immediate, one after a backoff) for transient failures; a rejected payload — a 400 — is not retried. The bounded queue then drops and counts on overflow (`alert dropped: webhook queue is full`). Collection and the API are unaffected: `Notify` never blocks. |
 | Invalid configuration | Startup fails with the offending field named. |
 | Workload deleted | Its telemetry ages out and is pruned; it disappears from the API. |
 | SIGTERM | HTTP server drains within `shutdown_timeout`, collector stops, sink drains its queue. |
@@ -133,6 +148,7 @@ Recorded as short ADRs:
 - [0003 — TimescaleDB optional and non-blocking](adr/0003-optional-timescaledb.md)
 - [0004 — Deterministic rules, not learned models](adr/0004-deterministic-rules.md)
 - [0005 — Measurements are optional values](adr/0005-optional-measurements.md)
+- [0006 — Alert deduplication via state transitions](adr/0006-alert-deduplication.md)
 
 ## Extension points
 

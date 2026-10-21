@@ -182,7 +182,7 @@ rate(ifa_alerts_sent_total[5m]) > 0
 # Alerts are being lost because the webhook is too slow or down.
 rate(ifa_alerts_dropped_total[5m]) > 0
 
-# Delivery failures (retried twice before counting).
+# Delivery failures (two attempts — one immediate, one after a backoff — before counting).
 rate(ifa_alerts_failed_total[5m]) > 0
 
 # How many findings are currently open (firing, not yet resolved).
