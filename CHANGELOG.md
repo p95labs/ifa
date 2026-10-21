@@ -166,10 +166,15 @@ Artifacts for this release:
   unknown keys are now a startup error rather than being silently ignored.
   Existing config files need updating.
 - Telemetry retention is bounded by both sample count and age.
-- **The Go version is now stated once and agreed everywhere.** `go.mod`, the CI
-  `GO_VERSION`, the release workflow and the Dockerfile previously specified
+- **The Go version is now stated once and deliberate everywhere.** `go.mod`, the
+  CI `GO_VERSION`, the release workflow and the Dockerfile previously specified
   three different versions, so CI on `main` could not build the project. The
-  floor is now 1.25 and all four match.
+  language floor is now 1.26; CI, the release workflow and the Dockerfile build
+  with 1.27. Those two numbers differing is intentional, not drift: a Go binary
+  embeds the standard library it was built with, so only a newer *toolchain*
+  carries a `crypto/tls` or `net/http` fix. Pinning the build toolchain to the
+  language floor would make the vulnerability scan unfixable the next time a
+  standard library advisory lands.
 - **The repository and Go module moved to `github.com/p95labs/ifa`.** Imports,
   the chart's `home`/`sources`, the image repository (`ghcr.io/p95labs/ifa`) and
   every documentation link were updated. The former paths are not redirected
@@ -178,6 +183,19 @@ Artifacts for this release:
   test deliberately stays on a Kubernetes 1.31 node — client-go is supported
   against servers either side, and the API surface IFA uses has been stable
   throughout.
+
+### Security
+
+- **Closed 11 reachable vulnerabilities.** `golang.org/x/net` moved to v0.60.0
+  (GO-2026-6603, -6610, -6611, -6612, -6617) and `golang.org/x/text` to v0.42.0
+  (GO-2026-6629, which is fixed in v0.41.0; v0.42.0 is what x/net v0.60.0
+  requires). The remainder — GO-2026-6605, -6607, -6608, -6613 and -6809, in
+  `crypto/tls`, `crypto/x509`, `net/http` and `net/textproto` — are standard
+  library issues that no dependency bump can reach, so the build toolchain moved
+  to 1.27 instead. All 11 were reachable from this code: the collector's scrape
+  path, the API server and the Kubernetes client all sit on `net/http`.
+  `govulncheck` reports no vulnerabilities as of this release; it is a required
+  CI check.
 
 ### Removed
 
