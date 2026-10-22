@@ -103,6 +103,11 @@ config:
 
   kubernetes:
     enabled: false
+    # Override the default namespace ("inference") to empty so the Helm RBAC
+    # template renders a ClusterRole instead of a namespace-scoped Role.
+    # A namespace-scoped Role requires the target namespace to exist at install
+    # time; the dynamic test cluster has no "inference" namespace.
+    namespace: ""
 
   recommender:
     thresholds:
