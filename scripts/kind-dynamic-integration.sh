@@ -373,32 +373,33 @@ echo "════════════════════════�
 echo " Scenario A — Counter-to-rate conversion"
 echo "════════════════════════════════════════════════════════════════════════"
 
-# ── A-1: First observation must not produce a rate (state 0 → already scraped)
-echo "==> [A-1] First scrape of dynserver-a: rates must be unmeasured"
+# ── A-1: Before any counter advance, rates must not be positive (state 0)
+echo "==> [A-1] State 0 (initial): rates must not be positive"
 #
-# At state 0 the collector has one counter observation with no prior value.
-# The rate tracker returns (0, false) → TokensPerSecond, PromptTokensPerSec
-# and RequestRatePerSec remain unmeasured (OK=false in telemetry JSON: the
-# field will be absent or show as the zero-value JSON).
+# The IFA telemetry API serialises measurements as flat JSON values:
+#   null   → unmeasured (no prior counter observation, or reset interval)
+#   0      → measured zero (counter unchanged between two consecutive scrapes)
+#   > 0    → measured positive (counter increased)
 #
-# The telemetry JSON represents measured/unmeasured fields using the Metric type.
-# A measured zero differs from unmeasured: measured is {"value":0,"ok":true},
-# unmeasured is {"value":0,"ok":false} or simply omitted.
-# The IFA API renders unmeasured as `"tokens_per_second":{"value":0,"ok":false}`.
-check_a1_unmeasured() {
+# At state 0 the dynserver counters are fixed (never change).  The first
+# collector scrape stores them as a baseline (rates = null); the second scrape
+# sees delta=0 and stores rates = 0.  Both are correct: no positive rate should
+# exist before any counter advance.  We assert "not positive" rather than
+# "null" to avoid a race between IFA's first and second scrape cycles.
+check_a1_not_positive() {
     curl -fsS "${IFA_API}/api/v1/telemetry" \
         | jq -e --arg w "dynserver-a" '
             [.items[] | select(.workload_name == $w)] | .[0]
-            | (.tokens_per_second.ok == false)
-              and (.prompt_tokens_per_sec.ok == false)
-              and (.request_rate_per_sec.ok == false)
+            | (.tokens_per_second == null or .tokens_per_second == 0)
+              and (.prompt_tokens_per_sec == null or .prompt_tokens_per_sec == 0)
+              and (.request_rate_per_sec == null or .request_rate_per_sec == 0)
         ' >/dev/null 2>&1
 }
-if ! assert_eventually "dynserver-a rates unmeasured at state 0" 10 2 check_a1_unmeasured; then
+if ! assert_eventually "dynserver-a rates not positive at state 0" 10 2 check_a1_not_positive; then
     show_diagnostics "dynserver-a"
     exit 1
 fi
-echo "    PASS: rates unmeasured at first observation (state 0)"
+echo "    PASS: rates not positive before counter advance (state 0)"
 
 # ── A-2: Advance to state 1; verify positive rates appear
 echo "==> [A-2] Advancing dynserver-a to state 1; expecting positive rates"
@@ -415,12 +416,9 @@ check_a2_rates_positive() {
     curl -fsS "${IFA_API}/api/v1/telemetry" \
         | jq -e --arg w "dynserver-a" '
             [.items[] | select(.workload_name == $w)] | .[0]
-            | (.tokens_per_second.ok == true)
-              and (.tokens_per_second.value > 0)
-              and (.prompt_tokens_per_sec.ok == true)
-              and (.prompt_tokens_per_sec.value > 0)
-              and (.request_rate_per_sec.ok == true)
-              and (.request_rate_per_sec.value > 0)
+            | (.tokens_per_second != null and .tokens_per_second > 0)
+              and (.prompt_tokens_per_sec != null and .prompt_tokens_per_sec > 0)
+              and (.request_rate_per_sec != null and .request_rate_per_sec > 0)
         ' >/dev/null 2>&1
 }
 if ! assert_eventually "dynserver-a rates positive at state 1" 15 2 check_a2_rates_positive; then
@@ -432,7 +430,7 @@ echo "    PASS: positive rates observed after counter advance (state 1)"
 # Verify the rate is within a reasonable range of the expected value.
 # Expected: ~200 gen tokens/s (1000 tokens over ~5s).
 # Tolerance: 4× slack covers scrape-timing variance in CI.
-gen_rate=$(telemetry_field "dynserver-a" ".tokens_per_second.value")
+gen_rate=$(telemetry_field "dynserver-a" ".tokens_per_second")
 echo "    Measured tokens_per_second = ${gen_rate} (expected ~200)"
 if ! echo "${gen_rate}" | awk '{ exit !($1 > 50 && $1 < 800) }'; then
     echo "ERROR: tokens_per_second ${gen_rate} is outside 50–800 range (expected ~200)" >&2
@@ -464,13 +462,14 @@ if ! wait_for_new_telemetry "dynserver-a" "${ts_before}"; then
     exit 1
 fi
 check_a4_zero_rates() {
+    # A measured zero is represented as the number 0 (not null).
+    # null == 0 is false in jq, so this correctly distinguishes measured-zero
+    # from unmeasured (null).
     curl -fsS "${IFA_API}/api/v1/telemetry" \
         | jq -e --arg w "dynserver-a" '
             [.items[] | select(.workload_name == $w)] | .[0]
-            | (.tokens_per_second.ok == true)
-              and (.tokens_per_second.value == 0)
-              and (.prompt_tokens_per_sec.ok == true)
-              and (.prompt_tokens_per_sec.value == 0)
+            | (.tokens_per_second == 0)
+              and (.prompt_tokens_per_sec == 0)
         ' >/dev/null 2>&1
 }
 if ! assert_eventually "dynserver-a zero rates at state 3" 15 2 check_a4_zero_rates; then
@@ -498,7 +497,7 @@ for st in 1 2 3 4 5; do
         show_diagnostics "dynserver-b"
         exit 1
     fi
-    waiting=$(telemetry_field "dynserver-b" ".requests_waiting.value")
+    waiting=$(telemetry_field "dynserver-b" ".requests_waiting")
     echo "    state ${st}: requests_waiting=${waiting}"
 done
 
@@ -544,7 +543,7 @@ for st in 6 7 8; do
         show_diagnostics "dynserver-b"
         exit 1
     fi
-    waiting=$(telemetry_field "dynserver-b" ".requests_waiting.value")
+    waiting=$(telemetry_field "dynserver-b" ".requests_waiting")
     echo "    state ${st}: requests_waiting=${waiting}"
 done
 # Allow extra scrape cycles for the window to be refilled with stable values.
@@ -586,7 +585,7 @@ for st in 1 2; do
         show_diagnostics "dynserver-c"
         exit 1
     fi
-    kv_val=$(telemetry_field "dynserver-c" ".kv_cache_usage_percent.value" 2>/dev/null || echo "n/a")
+    kv_val=$(telemetry_field "dynserver-c" ".kv_cache_usage_percent" 2>/dev/null || echo "n/a")
     echo "    state ${st}: kv_cache=${kv_val}%"
 done
 # IFA-KV-002 requires KVCacheUsagePct > 90% Sustained for 10s. State 0 was
@@ -688,10 +687,10 @@ if ! wait_for_new_telemetry "dynserver-d-nodcgm" "${ts_before}"; then
     show_diagnostics "dynserver-d-nodcgm"
     exit 1
 fi
-# GPU utilisation should be unmeasured.
-gpu_ok=$(telemetry_field "dynserver-d-nodcgm" ".gpu_utilization_percent.ok")
-if [[ "${gpu_ok}" != "false" ]]; then
-    echo "ERROR: gpu_utilization_percent.ok=${gpu_ok} for d-nodcgm (expected false/unmeasured)" >&2
+# GPU utilisation should be null (unmeasured) — no DCGM URL configured.
+gpu_val=$(telemetry_field "dynserver-d-nodcgm" ".gpu_utilization_percent")
+if [[ "${gpu_val}" != "null" ]]; then
+    echo "ERROR: gpu_utilization_percent=${gpu_val} for d-nodcgm (expected null/unmeasured)" >&2
     show_diagnostics "dynserver-d-nodcgm"
     exit 1
 fi
@@ -711,12 +710,11 @@ if ! absent_recommendation "IFA-EFF-002" "dynserver-d-eff"; then
 fi
 echo "    PASS: IFA-EFF-002 absent at state 0 (no token baseline)"
 
-# Check GPU is measured from DCGM.
-gpu_ok_eff=$(telemetry_field "dynserver-d-eff" ".gpu_utilization_percent.ok")
-gpu_val_eff=$(telemetry_field "dynserver-d-eff" ".gpu_utilization_percent.value")
-echo "    dynserver-d-eff GPU: ok=${gpu_ok_eff} value=${gpu_val_eff}%"
-if [[ "${gpu_ok_eff}" != "true" ]]; then
-    echo "ERROR: GPU utilisation unmeasured for d-eff (DCGM endpoint not working)" >&2
+# Check GPU is measured from DCGM (non-null number).
+gpu_val_eff=$(telemetry_field "dynserver-d-eff" ".gpu_utilization_percent")
+echo "    dynserver-d-eff GPU utilisation: ${gpu_val_eff}%"
+if [[ "${gpu_val_eff}" == "null" ]]; then
+    echo "ERROR: GPU utilisation null for d-eff (DCGM endpoint not working)" >&2
     show_diagnostics "dynserver-d-eff"
     exit 1
 fi
@@ -788,11 +786,12 @@ echo "════════════════════════�
 
 # ── E-1: Baseline established at state 0 (already scraped)
 echo "==> [E-1] State 0: baseline counters (gen_tokens=5000, preemptions=100)"
-gen_e0=$(telemetry_field "dynserver-e" ".tokens_per_second.ok")
-echo "    tokens_per_second.ok at state 0: ${gen_e0} (expected false — first observation)"
-# At state 0, no prior value exists → rate unmeasured.
-if [[ "${gen_e0}" != "false" ]]; then
-    echo "WARNING: tokens_per_second measured at state 0 (expected unmeasured)" >&2
+gen_e0=$(telemetry_field "dynserver-e" ".tokens_per_second")
+echo "    tokens_per_second at state 0: ${gen_e0} (null=unmeasured or 0=measured-zero, both OK)"
+# At state 0 the rate is either null (first observation) or 0 (constant counters).
+# Both are correct; we just log the value for diagnostics.
+if [[ "${gen_e0}" != "null" && "${gen_e0}" != "0" ]]; then
+    echo "WARNING: tokens_per_second=${gen_e0} at state 0 (expected null or 0)" >&2
 fi
 echo "    PASS: state 0 baseline noted"
 
@@ -804,20 +803,24 @@ if ! wait_for_new_telemetry "dynserver-e" "${ts_before}"; then
     show_diagnostics "dynserver-e"
     exit 1
 fi
-# After a reset the rate tracker re-baselines; rates must be unmeasured.
+# After a reset the rate tracker re-baselines; the reset interval must not
+# produce a positive rate (no false throughput spike).  The rate will be null
+# (unmeasured) on the first post-reset scrape, then 0 on subsequent scrapes
+# until the counter increments again.  We assert "not positive" to avoid a
+# race between IFA's first and second post-reset scrape cycles.
 check_e2_reset() {
     curl -fsS "${IFA_API}/api/v1/telemetry" \
         | jq -e --arg w "dynserver-e" '
             [.items[] | select(.workload_name == $w)] | .[0]
-            | (.tokens_per_second.ok == false)
+            | (.tokens_per_second == null or .tokens_per_second == 0)
         ' >/dev/null 2>&1
 }
-if ! assert_eventually "dynserver-e rates unmeasured after reset" 15 2 check_e2_reset; then
-    echo "ERROR: rates still measured after counter reset (expected unmeasured)" >&2
+if ! assert_eventually "dynserver-e no positive rate after reset" 15 2 check_e2_reset; then
+    echo "ERROR: positive rate observed after counter reset (reset not detected)" >&2
     show_diagnostics "dynserver-e"
     exit 1
 fi
-echo "    PASS: rates unmeasured after counter reset (state 1)"
+echo "    PASS: no positive rate after counter reset (state 1)"
 
 # ── E-3: Advance to state 2 (gen_tokens=4000 from new baseline 3000)
 echo "==> [E-3] Advancing to state 2 (gen_tokens 3000→4000 from reset baseline)"
@@ -832,8 +835,7 @@ check_e3_rates_positive() {
     curl -fsS "${IFA_API}/api/v1/telemetry" \
         | jq -e --arg w "dynserver-e" '
             [.items[] | select(.workload_name == $w)] | .[0]
-            | (.tokens_per_second.ok == true)
-              and (.tokens_per_second.value > 0)
+            | (.tokens_per_second != null and .tokens_per_second > 0)
         ' >/dev/null 2>&1
 }
 if ! assert_eventually "dynserver-e rates positive after reset recovery" 15 2 check_e3_rates_positive; then
@@ -869,8 +871,8 @@ check_f1_healthy() {
         | jq -e --arg w "dynserver-f" '
             [.items[] | select(.workload_name == $w)] | .[0]
             | . != null
-              and (.requests_waiting.ok == true)
-              and (.kv_cache_usage_percent.ok == true)
+              and (.requests_waiting != null)
+              and (.kv_cache_usage_percent != null)
         ' >/dev/null 2>&1
 }
 if ! assert_eventually "dynserver-f healthy at state 0" 10 2 check_f1_healthy; then
@@ -977,7 +979,7 @@ echo "            D (token throughput + synthetic DCGM), E (counter reset),"
 echo "            F (missing telemetry and recovery)"
 echo
 echo " Validated behaviours:"
-echo "   A: First observation → unmeasured rates"
+echo "   A: Before counter advance → rates not positive (null or zero)"
 echo "   A: Counter growth → positive rates within tolerance"
 echo "   A: Zero delta → zero rates"
 echo "   B: IFA-CAP-003 fires when queue trend > 1 and depth > threshold"
@@ -992,7 +994,7 @@ echo "   D: No token rate yet → IFA-EFF-002 absent"
 echo "   D: GPU>85% + tokens<200/s → IFA-EFF-002 fires"
 echo "   D: GPU from DCGM endpoint; throughput from counter delta"
 echo "   D: Throughput above threshold → IFA-EFF-002 absent"
-echo "   E: Decreasing counter → rates unmeasured (reset detected)"
+echo "   E: Decreasing counter → no positive rate (reset detected, null or zero)"
 echo "   E: New baseline established; subsequent increments yield correct rates"
 echo "   F: HTTP 503 → scrape error recorded; no snapshot written"
 echo "   F: Unrecognised exposition → metrics_missing populated"
