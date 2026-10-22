@@ -29,7 +29,7 @@ the single most important fact on this page.
 | Helm chart, RBAC, NetworkPolicy, security contexts | Integration validated for the default install path; NetworkPolicy itself is rendered and schema-checked, never enforced in CI |
 | Webhook alerting | Implemented |
 | TimescaleDB history | Implemented |
-| Counter-rate and queue-growth rules | Implemented — never evaluated against live time-separated deltas |
+| Counter-rate and queue-growth rules | Integration validated — exercised through actual collector scrapes in the dynamic kind integration test; see below |
 | Demo and its end-to-end test | Locally validated |
 
 "Locally validated" for the parser, rules and demo means `make demo` and
@@ -119,23 +119,40 @@ The Triton adapter was run against a real Triton 25.12 server:
 GPU-backed Triton remains unvalidated. GPU-backed vLLM and a DCGM-compatible
 exporter have since been validated on one NVIDIA L4; see above.
 
-### 1. Dynamic, multi-scrape validation
+### Done: dynamic multi-scrape validation in CI
 
-The largest remaining gap. Every live capture so far is a *snapshot*, and the
-kind integration test serves one static payload on every scrape, so every
-counter delta is zero. That leaves an entire class of rules evaluated only
-against synthetic data:
+The counter-rate and queue-growth rules are now validated end-to-end through
+actual successive IFA collector scrapes against a deterministic synthetic server
+(`dynserver`, built from `test/integration/dynserver/cmd/`) deployed in a kind
+cluster. The test runs in CI (`kind-dynamic-integration` job) on every push and
+pull request to `main`.
 
-- `IFA-CAP-003` (queue growing) — needs a positive queue-depth trend across samples
-- `IFA-KV-001` (KV preemption) — needs a `preemptions_per_sec` rate, not a counter value
-- `IFA-EFF-002` (low token throughput) — needs `generation_tokens_total` deltas
-- Counter-reset handling on a real pod restart
+Six scenarios are validated, each through the full pipeline:
+Kubernetes workload → HTTP scrape → runtime adapter → rate tracker → telemetry
+store → rule engine → REST API:
 
-Closing it means capturing a *sequence* of time-separated payloads from a live
-server under changing load, and serving them in order to the collector, rather
-than one payload repeatedly. The GPU session that produced the KV-exhaustion
-capture is the natural source: the preemption counter was observed climbing, so
-the rate exists in the data and has simply never been measured across two scrapes.
+| Scenario | Rule validated | What is checked |
+|---|---|---|
+| A — Counter-to-rate | (collector layer) | First observation → unmeasured; counter growth → positive rates within tolerance; zero delta → zero rate |
+| B — Growing queue | `IFA-CAP-003` | Rule fires only after `minSamples=6` across the trend window; evidence includes `queue_trend`; deep stable queue does not fire |
+| C — KV preemption | `IFA-KV-001` / `IFA-KV-002` | High KV without preemption delta → IFA-KV-001 absent; positive delta → IFA-KV-001 fires and suppresses IFA-KV-002 |
+| D — Low throughput | `IFA-EFF-002` | Synthetic DCGM GPU metrics (92% util) + low token rate → rule fires; GPU unmeasured (no DCGM URL) → absent; throughput above threshold → absent |
+| E — Counter reset | (collector layer) | Decreasing counter → interval unmeasured; new baseline; subsequent increments yield correct rates |
+| F — Missing telemetry | `IFA-OBS-001` path | HTTP 503 → no snapshot written; unrecognised exposition → `metrics_missing` populated; recovery → healthy telemetry resumes |
+
+**What this does and does not prove.** The dynserver generates synthetic
+vLLM-compatible Prometheus exposition; it is not a real vLLM process. The
+counter values, queue depths, and KV-cache percentages are deterministic and
+chosen to exercise rule thresholds, not measured from a GPU workload. The
+synthetic DCGM endpoint reports a fixed GPU utilisation of 92%; it does not
+reflect physical GPU state. All payloads are labelled `synthetic_source=dynserver-integration-test`.
+
+These tests prove that the IFA *pipeline* (scraping → rate tracking → rule
+evaluation → API) correctly handles changing telemetry, counter resets, and
+missing data. They do not prove that the rules fire correctly against a real
+inference workload, which requires a live server and remains a gap.
+
+### 1. Live dynamic validation with a real inference server
 
 ### 2. Per-pod GPU attribution
 
@@ -196,8 +213,9 @@ from someone who runs them and can check the output.
 
 ## Toward v1.0
 
-Not close. GPU-backed vLLM validation and real-cluster validation are now done;
-what remains would need, at minimum: dynamic multi-scrape validation of the
-counter-rate rules; GPU-backed Triton; authentication on the API; per-workload
+Not close. GPU-backed vLLM validation, real-cluster validation, and dynamic
+multi-scrape validation of the counter-rate rules are now done. What remains
+would need, at minimum: live dynamic validation against a real inference server
+under changing load; GPU-backed Triton; authentication on the API; per-workload
 thresholds; signed images and an SBOM; and a stable API used by somebody other
 than the author.

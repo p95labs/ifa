@@ -24,9 +24,11 @@ specific, and they are not "unvalidated" in general:
 - **Multi-GPU behaviour** has not been validated on hardware. One NVIDIA L4 was
   available; a single-GPU capture proves nothing about max-across-devices
   aggregation, multi-GPU KV-cache pooling, or per-device attribution.
-- **Counter rates** have never been measured live. Every capture is a single
-  snapshot, so preemption, throughput and queue-growth rates remain
-  synthetic-only.
+- **Live counter rates** from a real inference server have not been measured.
+  The capture set is single-snapshot-only. Counter-rate and queue-growth
+  rules are now validated end-to-end in the dynamic kind integration test
+  (see `scripts/kind-dynamic-integration.sh` and the Roadmap), but against
+  a synthetic metrics server, not a live vLLM or Triton process.
 
 If you run GPU-backed Triton or the official `dcgm-exporter`, `ifa check <url>`
 produces the report that would close the first two.
