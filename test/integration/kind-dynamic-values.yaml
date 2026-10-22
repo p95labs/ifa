@@ -1,0 +1,114 @@
+# Helm values override for the kind dynamic multi-scrape integration test.
+#
+# This file is used ONLY by scripts/kind-dynamic-integration.sh.
+# It extends the static integration test's timing overrides and adds
+# explicit targets for the dynserver Scenarios A–F.
+#
+# All diagnosis-semantic thresholds (ttft_p95_ms, queue_waiting_requests,
+# kv_cache_high_pct, preemptions_per_sec, tokens_per_second_low, etc.) are
+# left at their production defaults.  Only CI-speed-specific values are
+# overridden; those are the same as kind-values.yaml, documented below.
+#
+#   image.pullPolicy: Never
+#       Image loaded via `kind load docker-image`; must not be pulled.
+#
+#   collector.interval: 5s / timeout: 4s
+#       Shorter than the production default (15 s) so the window fills
+#       in seconds rather than minutes.
+#
+#   recommender.thresholds.sustain_for: 10s
+#       Shorter than the production default (45 s).  With interval=5s,
+#       e.Span() reaches 10 s after the third collection cycle.
+#
+# Target notes
+# ────────────
+# All dynserver workloads are in the `integration` namespace.
+# The dynserver pod is reached at http://dynserver.integration.svc:9100.
+#
+# dynserver-d-eff   has a dcgm_url pointing at the simulated GPU endpoint.
+# dynserver-d-nodcgm has no dcgm_url; GPU utilisation stays unmeasured so
+#                   IFA-EFF-002 must not fire even with low token throughput.
+#
+# Kubernetes discovery is disabled in this test; all targets are explicit
+# so that the discovery label annotations on the dynserver deployment do not
+# affect state tracking.
+
+image:
+  repository: ifa
+  tag: integration-test
+  pullPolicy: Never
+
+config:
+  cluster_name: kind-dynamic-integration
+
+  logging:
+    level: debug
+    format: text
+
+  collector:
+    interval: 5s
+    timeout: 4s
+    targets:
+      # Scenario A — counter-to-rate conversion
+      - name: dynserver-a
+        namespace: integration
+        runtime: vllm
+        model_name: synthetic/test
+        metrics_url: http://dynserver.integration.svc:9100/scenario/a/metrics
+
+      # Scenario B — growing request queue (IFA-CAP-003)
+      - name: dynserver-b
+        namespace: integration
+        runtime: vllm
+        model_name: synthetic/test
+        metrics_url: http://dynserver.integration.svc:9100/scenario/b/metrics
+
+      # Scenario C — KV-cache preemption (IFA-KV-001 / IFA-KV-002)
+      - name: dynserver-c
+        namespace: integration
+        runtime: vllm
+        model_name: synthetic/test
+        metrics_url: http://dynserver.integration.svc:9100/scenario/c/metrics
+
+      # Scenario D — low token throughput + synthetic DCGM GPU metrics (IFA-EFF-002)
+      # This workload has a DCGM URL; GPU utilisation is measured.
+      - name: dynserver-d-eff
+        namespace: integration
+        runtime: vllm
+        model_name: synthetic/test
+        metrics_url: http://dynserver.integration.svc:9100/scenario/d-eff/metrics
+        dcgm_url: http://dynserver.integration.svc:9100/scenario/d-eff/dcgm
+
+      # Scenario D control — no DCGM URL; GPU utilisation unmeasured.
+      # IFA-EFF-002 must not fire even when token throughput is low.
+      - name: dynserver-d-nodcgm
+        namespace: integration
+        runtime: vllm
+        model_name: synthetic/test
+        metrics_url: http://dynserver.integration.svc:9100/scenario/d-nodcgm/metrics
+
+      # Scenario E — counter reset handling
+      - name: dynserver-e
+        namespace: integration
+        runtime: vllm
+        model_name: synthetic/test
+        metrics_url: http://dynserver.integration.svc:9100/scenario/e/metrics
+
+      # Scenario F — missing telemetry and recovery
+      - name: dynserver-f
+        namespace: integration
+        runtime: vllm
+        model_name: synthetic/test
+        metrics_url: http://dynserver.integration.svc:9100/scenario/f/metrics
+
+  kubernetes:
+    enabled: false
+    # Override the default namespace ("inference") to empty so the Helm RBAC
+    # template renders a ClusterRole instead of a namespace-scoped Role.
+    # A namespace-scoped Role requires the target namespace to exist at install
+    # time; the dynamic test cluster has no "inference" namespace.
+    namespace: ""
+
+  recommender:
+    thresholds:
+      sustain_for: 10s

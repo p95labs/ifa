@@ -223,6 +223,75 @@ jobs:
           kubectl get all --all-namespaces 2>/dev/null || true
           kubectl describe pods --all-namespaces 2>/dev/null || true
 
+  kind-dynamic-integration:
+    name: Kind dynamic integration test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      # Build the IFA image. We share the GHA cache key with the static
+      # integration test job so a back-to-back push benefits from the warm cache.
+      - name: Build IFA image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          push: false
+          load: true
+          tags: ifa:integration-test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Build the dynserver image. It is a separate binary so a change to one
+      # does not force a rebuild of the other.
+      - name: Build dynserver image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/docker/Dockerfile.dynserver
+          push: false
+          load: true
+          tags: dynserver:integration-test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Install kind
+        run: |
+          sudo curl -sSLo /usr/local/bin/kind \
+            "https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64"
+          sudo chmod +x /usr/local/bin/kind
+          kind version
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.16.3
+
+      - name: Run dynamic integration test
+        run: |
+          IFA_IMAGE=ifa:integration-test \
+          DYNSERVER_IMAGE=dynserver:integration-test \
+          bash scripts/kind-dynamic-integration.sh
+
+      - name: IFA pod logs on failure
+        if: failure()
+        run: |
+          kubectl logs --namespace ifa \
+            -l app.kubernetes.io/name=ifa --tail=100 2>/dev/null || true
+
+      - name: dynserver logs on failure
+        if: failure()
+        run: |
+          kubectl logs --namespace integration \
+            -l app=dynserver --tail=80 2>/dev/null || true
+
+      - name: Cluster state on failure
+        if: failure()
+        run: |
+          kubectl get all --all-namespaces 2>/dev/null || true
+          kubectl describe pods --all-namespaces 2>/dev/null || true
+
   vulncheck:
     name: Vulnerability scan
     runs-on: ubuntu-latest

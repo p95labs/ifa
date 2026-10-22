@@ -1,0 +1,35 @@
+# Dockerfile.dynserver — builds the IFA dynamic multi-scrape integration test server.
+#
+# This image is used ONLY for integration testing in a local kind cluster.
+# It is never pushed to a registry and must not be confused with the IFA
+# production image (deploy/docker/Dockerfile).
+#
+# The binary is a standalone HTTP server that serves synthetic Prometheus
+# exposition for the dynamic multi-scrape integration tests (Scenarios A–F).
+# It imports no production IFA packages.
+
+FROM golang:1.27-alpine AS build
+
+WORKDIR /src
+
+# Download dependencies before copying source so a code-only change does not
+# re-pull the module cache.
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=linux go build \
+        -trimpath -ldflags "-s -w" \
+        -o /out/dynserver \
+        ./test/integration/dynserver/cmd
+
+# Use a minimal base: the binary is statically linked and needs nothing else.
+FROM gcr.io/distroless/static-debian12:nonroot
+
+COPY --from=build /out/dynserver /dynserver
+
+EXPOSE 9100
+
+ENTRYPOINT ["/dynserver"]
+CMD ["-addr", ":9100"]
