@@ -152,6 +152,37 @@ evaluation → API) correctly handles changing telemetry, counter resets, and
 missing data. They do not prove that the rules fire correctly against a real
 inference workload, which requires a live server and remains a gap.
 
+### Done: NVIDIA official dcgm-exporter and second NVIDIA L4 session (E2E Networks)
+
+NVIDIA's official `dcgm-exporter` container image has been validated on a real
+NVIDIA L4:
+
+- E2E Networks GPU node (`p95labs-ifa-l4-validation`), Delhi NCR
+- `nvcr.io/nvidia/k8s/dcgm-exporter:3.3.9-3.6.1-ubuntu22.04` (embedded DCGM,
+  Docker `--gpus all --privileged`)
+- Driver 570.133.20, CUDA 12.8, Ubuntu 22.04.5
+- `DCGM successfully initialized!` on startup; all six fields the adapter reads
+  are present and correctly formatted in the `default-counters.csv` field set
+- Idle capture: `GPU_UTIL=0%`, `FB_USED=0 MiB`, `GPU_TEMP=33°C`
+- Under sustained load (80-worker `facebook/opt-125m` KV-exhaustion run):
+  `GPU_UTIL=100%`, `FB_USED=1548 MiB`, `GPU_TEMP=46→58°C`
+- No refresh lag observed — 100% GPU_UTIL within the first 14 s sampling window,
+  confirming the ~18–20 s lag in the earlier session was specific to the
+  JarvisLabs bundled exporter, not DCGM in general
+- Three verbatim captures committed: idle, under-load, recovery
+
+A second vLLM GPU session was run in the same E2E environment:
+
+- 80 workers, `ignore_eos=True`, `--num-gpu-blocks-override 1024`
+- 2 890 requests completed in 90 s, 0 errors
+- KV cache reached 100% within 14 s; `num_preemptions_total` grew at
+  ~280–300 preemptions/s throughout
+- Independently measured counter rates confirm the collector's rate arithmetic
+  (see `internal/runtime/vllm/testdata/e2e/README.md`)
+- Recovery confirmed: `num_requests_running=0`, `waiting=0`, `kv_cache=0`
+  within 12 s of load stopping
+- Four verbatim captures committed: idle, KV-exhausted, settled, recovery
+
 ### 1. Live dynamic validation with a real inference server
 
 ### 2. Per-pod GPU attribution
@@ -165,15 +196,13 @@ that the informer cache already has.
 Until this lands, GPU findings are trustworthy on dedicated GPU nodes and
 approximate on shared ones. The docs say so; the API does not yet.
 
-### 3. GPU-backed Triton, and NVIDIA's own dcgm-exporter
+### 3. GPU-backed Triton
 
-Two named gaps that a single GPU session would close. Triton has been validated
-on CPU only, where it publishes no `nv_gpu_*` families at all, so the
-`nv_gpu_utilization` ×100 conversion has never been checked against a real
-reading. And the DCGM validation used a DCGM-*compatible* exporter bundled by
-the GPU host, not NVIDIA's official `dcgm-exporter` image — a narrower field set
-that happened to include every field the adapter reads. If you run either,
-`ifa check <url>` produces the report that would close it.
+Triton has been validated on CPU only, where it publishes no `nv_gpu_*` families
+at all, so the `nv_gpu_utilization` ×100 conversion has never been checked
+against a real reading. If you run GPU-backed Triton, `ifa check <url>` produces
+the report that would close this gap. NVIDIA's official `dcgm-exporter` has now
+been validated separately (see above).
 
 ### 4. Per-workload thresholds
 

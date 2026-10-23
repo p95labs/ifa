@@ -113,6 +113,81 @@ func fixture(t *testing.T, name string) string {
 	return string(b)
 }
 
+// TestCapturedPayloadOfficialExporter validates the adapter against verbatim
+// /metrics payloads from NVIDIA's official dcgm-exporter container image
+// (nvcr.io/nvidia/k8s/dcgm-exporter:3.3.9-3.6.1-ubuntu22.04) running on an
+// E2E Networks NVIDIA L4 node (driver 570.133.20, CUDA 12.8, Ubuntu 22.04.5).
+// This closes the validation gap documented in testdata/README.md — the
+// JarvisLabs captures used a DCGM-compatible bundled exporter; these use the
+// canonical NVIDIA image. See testdata/e2e/README.md for full provenance.
+func TestCapturedPayloadOfficialExporter(t *testing.T) {
+	cases := []struct {
+		name       string
+		fix        string
+		wantUtil   float64
+		wantMemMiB float64
+		wantMemPct float64
+		wantTempC  float64
+	}{
+		{
+			name:       "official-idle",
+			fix:        "e2e/dcgm_official_e2e_l4_idle.txt",
+			wantUtil:   0,
+			wantMemMiB: 0,
+			// FB_FREE=24100, FB_USED=0 → 0/(0+24100) * 100 = 0%
+			wantMemPct: 0,
+			wantTempC:  33,
+		},
+		{
+			name:       "official-under-load",
+			fix:        "e2e/dcgm_official_e2e_l4_under_load.txt",
+			wantUtil:   100,
+			wantMemMiB: 1548,
+			// FB_FREE=22552, FB_USED=1548 → 1548/24100 * 100 ≈ 6.423...%
+			wantMemPct: 1548.0 / (1548.0 + 22552.0) * 100,
+			wantTempC:  46,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := fixture(t, tc.fix)
+			devices, err := Parse(body)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			if len(devices) != 1 {
+				t.Fatalf("got %d devices, want 1 (NVIDIA L4)", len(devices))
+			}
+			d := devices[0]
+			if !d.UtilizationPct.OK {
+				t.Fatalf("utilisation not measured; adapter may need updating")
+			}
+			if math.Abs(d.UtilizationPct.Value-tc.wantUtil) > 1e-9 {
+				t.Errorf("utilisation = %v, want %v", d.UtilizationPct.Value, tc.wantUtil)
+			}
+			if !d.MemoryUsedMiB.OK {
+				t.Fatalf("memory used (MiB) not measured")
+			}
+			if math.Abs(d.MemoryUsedMiB.Value-tc.wantMemMiB) > 1e-9 {
+				t.Errorf("memory used MiB = %v, want %v", d.MemoryUsedMiB.Value, tc.wantMemMiB)
+			}
+			if !d.MemoryUsedPct.OK {
+				t.Fatalf("memory used (%%) not measured")
+			}
+			if math.Abs(d.MemoryUsedPct.Value-tc.wantMemPct) > 1e-6 {
+				t.Errorf("memory used %% = %v, want %v", d.MemoryUsedPct.Value, tc.wantMemPct)
+			}
+			if !d.TemperatureC.OK {
+				t.Fatalf("temperature not measured")
+			}
+			if math.Abs(d.TemperatureC.Value-tc.wantTempC) > 1e-9 {
+				t.Errorf("temperature = %v°C, want %v°C", d.TemperatureC.Value, tc.wantTempC)
+			}
+		})
+	}
+}
+
 // TestCapturedPayload runs the adapter against two verbatim /metrics payloads
 // captured from a real NVIDIA L4 GPU via a DCGM-compatible exporter
 // (JarvisLabs guest-monitor). See testdata/README.md for full provenance,
