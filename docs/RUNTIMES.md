@@ -7,31 +7,35 @@ adapter has actually been validated.
 
 | Adapter | Implemented against | Tested against | Run against a live server |
 |---|---|---|---|
-| vLLM | `vllm/v1/metrics/loggers.py` (metric names, types, labels, histogram bucket boundaries) | Fixtures built from those definitions, including a V0-era payload and a two-model payload; plus four verbatim live captures — three from CPU (idle, loaded, capacity-queued) and one from an NVIDIA L4 at ≈99.9% KV-cache occupancy | **Yes** — vLLM 0.28.0 on ARM64 CPU (`facebook/opt-125m`) and on one NVIDIA L4 under KV-cache exhaustion |
+| vLLM | `vllm/v1/metrics/loggers.py` (metric names, types, labels, histogram bucket boundaries) | Fixtures built from those definitions, including a V0-era payload and a two-model payload; plus seven verbatim live captures — three from CPU (idle, loaded, capacity-queued) and four from two separate NVIDIA L4 sessions (KV-cache exhaustion, settled exhaustion, recovery) | **Yes** — vLLM 0.28.0 on ARM64 CPU (`facebook/opt-125m`) and on two NVIDIA L4 GPUs (JarvisLabs and E2E Networks) under KV-cache exhaustion |
 | Triton | The published metrics documentation | Fixtures for the default and summary-latency configurations; plus three verbatim live captures (idle, loaded, summary-latencies-enabled) from Triton 25.12 | **Yes** — Triton 25.12, ARM64 CPU backend, Python echo model; GPU-backed Triton not yet validated |
-| DCGM Exporter | Published field IDs | Fixtures including multi-GPU and partial payloads; plus a matched pair of verbatim live captures (settled and refresh-lagged) from an NVIDIA L4 | **Yes** — a DCGM-*compatible* exporter on one NVIDIA L4; NVIDIA's official `dcgm-exporter` image not yet validated |
+| DCGM Exporter | Published field IDs | Fixtures including multi-GPU and partial payloads; plus five verbatim live captures from two NVIDIA L4 sessions: a matched refresh-lag pair (JarvisLabs bundled exporter) and idle/load/recovery (NVIDIA's official `dcgm-exporter:3.3.9-3.6.1-ubuntu22.04`) | **Yes** — both a DCGM-compatible bundled exporter (JarvisLabs) and NVIDIA's official `dcgm-exporter` container image on one NVIDIA L4 (E2E Networks, driver 570.133.20) |
 
-All three adapters have now been run against a live endpoint. The gaps are
-specific, and they are not "unvalidated" in general:
+All three adapters have now been run against a live endpoint. The remaining
+gaps are specific:
 
 - **GPU-backed Triton** has not been run. Triton's live validation is CPU-only,
   where the server publishes no `nv_gpu_*` families at all, so the
   `nv_gpu_utilization` ×100 conversion is still unverified against a real reading.
-- **NVIDIA's official `dcgm-exporter`** has not been run. The DCGM validation
-  used a DCGM-compatible exporter bundled by the GPU host — a narrower field set
-  that happens to include every field the adapter reads. See
-  [`internal/runtime/dcgm/testdata/README.md`](../internal/runtime/dcgm/testdata/README.md).
-- **Multi-GPU behaviour** has not been validated on hardware. One NVIDIA L4 was
-  available; a single-GPU capture proves nothing about max-across-devices
-  aggregation, multi-GPU KV-cache pooling, or per-device attribution.
-- **Live counter rates** from a real inference server have not been measured.
-  The capture set is single-snapshot-only. Counter-rate and queue-growth
-  rules are now validated end-to-end in the dynamic kind integration test
-  (see `scripts/kind-dynamic-integration.sh` and the Roadmap), but against
-  a synthetic metrics server, not a live vLLM or Triton process.
+- **Multi-GPU behaviour** has not been validated on hardware. Both L4 sessions
+  used a single-GPU node; a single-card capture proves nothing about
+  max-across-devices aggregation, multi-GPU KV-cache pooling, or per-device
+  attribution.
+- **Live counter rates against a real inference server** — the preemption-rate
+  and token-rate rules were validated end-to-end in the dynamic kind integration
+  test (`scripts/kind-dynamic-integration.sh`) against a synthetic server, and
+  independently confirmed by computing raw counter deltas over consecutive
+  captures from the E2E L4 session (see
+  `internal/runtime/vllm/testdata/e2e/README.md`), but IFA's own telemetry API
+  has not been exercised end-to-end against a live vLLM process in a real
+  Kubernetes cluster.
 
-If you run GPU-backed Triton or the official `dcgm-exporter`, `ifa check <url>`
-produces the report that would close the first two.
+The NVIDIA official `dcgm-exporter` gap is now closed. See
+[`internal/runtime/dcgm/testdata/e2e/README.md`](../internal/runtime/dcgm/testdata/e2e/README.md)
+for full provenance.
+
+If you run GPU-backed Triton, `ifa check <url>` produces the report that would
+close that gap.
 
 ---
 

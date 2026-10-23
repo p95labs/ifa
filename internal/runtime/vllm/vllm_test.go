@@ -305,6 +305,27 @@ func TestCapturedPayload(t *testing.T) {
 			wantCapacityWaiting: 16,
 			wantDeferredWaiting: 0,
 		},
+		// E2E Networks NVIDIA L4 captures — official vllm/vllm-openai:v0.28.0,
+		// facebook/opt-125m, --num-gpu-blocks-override 1024. Driver 570.133.20,
+		// CUDA 12.8, Ubuntu 22.04.5. See testdata/e2e/README.md for full provenance.
+		{
+			name:                "e2e-l4-kv-exhausted",
+			fixture:             "e2e/vllm_e2e_l4_kv_exhausted.txt",
+			wantRunning:         63,
+			wantWaiting:         17,
+			wantKV:              100,
+			wantCapacityWaiting: 17,
+			wantDeferredWaiting: 0,
+		},
+		{
+			name:                "e2e-l4-recovery",
+			fixture:             "e2e/vllm_e2e_l4_recovery.txt",
+			wantRunning:         0,
+			wantWaiting:         0,
+			wantKV:              0,
+			wantCapacityWaiting: 0,
+			wantDeferredWaiting: 0,
+		},
 	}
 
 	for _, tc := range cases {
