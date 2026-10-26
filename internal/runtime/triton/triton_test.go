@@ -326,6 +326,148 @@ func TestCapturedPayload(t *testing.T) {
 	}
 }
 
+// TestCapturedPayloadGPU validates the Triton adapter against three verbatim
+// /metrics captures from a real Triton 25.12 server running the gpu_matmul
+// model on an NVIDIA L4 GPU (E2E Networks, driver 570.133.20, CUDA 12.8).
+//
+// This is the first validation of the nv_gpu_utilization ×100 path against
+// actual GPU hardware. The three captures cover:
+//
+//   - idle: model loaded, zero requests, GPU warm
+//   - under-load: 40 concurrent workers, dynamic batching active,
+//     summary latencies enabled
+//   - recovery: all workers stopped, pending count returned to zero
+//
+// See testdata/e2e/README.md for full provenance.
+func TestCapturedPayloadGPU(t *testing.T) {
+	const capturedModel = "gpu_matmul"
+
+	cases := []struct {
+		name    string
+		fixture string
+
+		// GPU metrics
+		wantGPUUtilPct    float64 // nv_gpu_utilization × 100
+		wantGPUUtilOK     bool
+		wantGPUMemPctOK   bool
+		wantGPUMemPctLow  float64 // lower bound (%)
+		wantGPUMemPctHigh float64 // upper bound (%)
+
+		// Inference
+		wantWaiting    float64
+		hasSummary     bool
+		wantP95Ms      float64
+		wantP99Ms      float64
+		wantQueueP95Ms float64
+	}{
+		{
+			// Idle: model loaded on GPU, no requests submitted.
+			// nv_gpu_utilization = 0 → GPUUtilizationPct = 0.
+			// nv_gpu_memory_used_bytes = 270532608 (model weights on GPU).
+			// nv_gpu_memory_total_bytes = 24152899584 (24 GB L4).
+			// Memory pct ≈ 270532608/24152899584 × 100 ≈ 1.12%.
+			name:              "e2e-gpu-idle",
+			fixture:           "e2e/triton_gpu_l4_idle.txt",
+			wantGPUUtilOK:     true,
+			wantGPUUtilPct:    0,
+			wantGPUMemPctOK:   true,
+			wantGPUMemPctLow:  1.0,
+			wantGPUMemPctHigh: 1.5,
+			wantWaiting:       0,
+		},
+		{
+			// Under load: 40 workers, dynamic batching active.
+			// nv_gpu_utilization = 0.02 → GPUUtilizationPct must be 2, not 0.02.
+			// This is the critical path for the ×100 conversion.
+			// nv_inference_pending_request_count = 30 (dynamic batching queue).
+			// Summary latencies enabled; p95 = 109233 µs → 109.233 ms.
+			name:              "e2e-gpu-under-load",
+			fixture:           "e2e/triton_gpu_l4_under_load.txt",
+			wantGPUUtilOK:     true,
+			wantGPUUtilPct:    2,
+			wantGPUMemPctOK:   true,
+			wantGPUMemPctLow:  1.0,
+			wantGPUMemPctHigh: 1.5,
+			wantWaiting:       30,
+			hasSummary:        true,
+			wantP95Ms:         109.233,
+			wantP99Ms:         117.378,
+			wantQueueP95Ms:    78.308,
+		},
+		{
+			// Recovery: all workers stopped, pending returned to zero.
+			// nv_gpu_utilization = 0 → GPUUtilizationPct = 0.
+			name:              "e2e-gpu-recovery",
+			fixture:           "e2e/triton_gpu_l4_recovery.txt",
+			wantGPUUtilOK:     true,
+			wantGPUUtilPct:    0,
+			wantGPUMemPctOK:   true,
+			wantGPUMemPctLow:  1.0,
+			wantGPUMemPctHigh: 1.5,
+			wantWaiting:       0,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b, err := os.ReadFile(filepath.Join("testdata", tc.fixture))
+			if err != nil {
+				t.Fatalf("reading fixture: %v", err)
+			}
+			body := string(b)
+
+			if got := firstTritonModel(body); got != capturedModel {
+				t.Fatalf("fixture model label = %q, want %q", got, capturedModel)
+			}
+
+			r, err := New().Parse(body, capturedModel)
+			if err != nil {
+				t.Fatalf("Parse: %v", err)
+			}
+			s := r.Snapshot
+
+			if r.UnparseableLines > 0 {
+				t.Errorf("%d unparseable line(s)", r.UnparseableLines)
+			}
+			if len(r.Missing) != 0 {
+				t.Errorf("missing metrics on GPU server: %v", r.Missing)
+			}
+
+			// GPU utilization ×100 conversion: nv_gpu_utilization is [0,1].
+			if tc.wantGPUUtilOK && !s.GPUUtilizationPct.OK {
+				t.Fatal("GPUUtilizationPct not measured; nv_gpu_utilization was present")
+			}
+			if got := s.GPUUtilizationPct.Value; math.Abs(got-tc.wantGPUUtilPct) > 1e-9 {
+				t.Errorf("GPUUtilizationPct = %v, want %v (nv_gpu_utilization ×100 conversion)",
+					got, tc.wantGPUUtilPct)
+			}
+
+			// GPU memory percentage derived from used/total.
+			if tc.wantGPUMemPctOK && !s.GPUMemoryUsedPct.OK {
+				t.Fatal("GPUMemoryUsedPct not measured; nv_gpu_memory_* were present")
+			}
+			if pct := s.GPUMemoryUsedPct.Value; pct < tc.wantGPUMemPctLow || pct > tc.wantGPUMemPctHigh {
+				t.Errorf("GPUMemoryUsedPct = %v, want in [%v, %v]",
+					pct, tc.wantGPUMemPctLow, tc.wantGPUMemPctHigh)
+			}
+
+			// Pending (queue depth).
+			if !s.RequestsWaiting.OK {
+				t.Error("RequestsWaiting not measured")
+			} else if s.RequestsWaiting.Value != tc.wantWaiting {
+				t.Errorf("RequestsWaiting = %v, want %v", s.RequestsWaiting.Value, tc.wantWaiting)
+			}
+
+			// Summary latencies (only when present in fixture).
+			if tc.hasSummary {
+				checkClose(t, "P95LatencyMs", s.P95LatencyMs, tc.wantP95Ms)
+				checkClose(t, "P99LatencyMs", s.P99LatencyMs, tc.wantP99Ms)
+				checkClose(t, "QueueTimeP95Ms", s.QueueTimeP95Ms, tc.wantQueueP95Ms)
+			}
+		})
+	}
+}
+
 func checkClose(t *testing.T, name string, got telemetry.Metric, want float64) {
 	t.Helper()
 	if !got.OK {

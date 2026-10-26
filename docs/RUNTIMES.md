@@ -7,35 +7,34 @@ adapter has actually been validated.
 
 | Adapter | Implemented against | Tested against | Run against a live server |
 |---|---|---|---|
-| vLLM | `vllm/v1/metrics/loggers.py` (metric names, types, labels, histogram bucket boundaries) | Fixtures built from those definitions, including a V0-era payload and a two-model payload; plus seven verbatim live captures — three from CPU (idle, loaded, capacity-queued) and four from two separate NVIDIA L4 sessions (KV-cache exhaustion, settled exhaustion, recovery) | **Yes** — vLLM 0.28.0 on ARM64 CPU (`facebook/opt-125m`) and on two NVIDIA L4 GPUs (JarvisLabs and E2E Networks) under KV-cache exhaustion |
-| Triton | The published metrics documentation | Fixtures for the default and summary-latency configurations; plus three verbatim live captures (idle, loaded, summary-latencies-enabled) from Triton 25.12 | **Yes** — Triton 25.12, ARM64 CPU backend, Python echo model; GPU-backed Triton not yet validated |
+| vLLM | `vllm/v1/metrics/loggers.py` (metric names, types, labels, histogram bucket boundaries) | Fixtures built from those definitions, including a V0-era payload and a two-model payload; plus seven verbatim live captures — three from CPU (idle, loaded, capacity-queued) and four from two separate NVIDIA L4 sessions (KV-cache exhaustion, settled exhaustion, recovery); plus K8s API responses | **Yes** — vLLM 0.28.0 on ARM64 CPU (`facebook/opt-125m`), on two NVIDIA L4 GPUs (JarvisLabs and E2E Networks) under KV-cache exhaustion, and inside a K3s cluster with DCGM producing 4 live rule firings |
+| Triton | The published metrics documentation | Fixtures for the default and summary-latency configurations; plus three CPU captures and three GPU E2E captures from Triton 25.12 | **Yes** — Triton 25.12, ARM64 CPU (Python echo model) and one NVIDIA L4 GPU (TorchScript `gpu_matmul`, 44,432 requests, all 10 metric families confirmed) |
 | DCGM Exporter | Published field IDs | Fixtures including multi-GPU and partial payloads; plus five verbatim live captures from two NVIDIA L4 sessions: a matched refresh-lag pair (JarvisLabs bundled exporter) and idle/load/recovery (NVIDIA's official `dcgm-exporter:3.3.9-3.6.1-ubuntu22.04`) | **Yes** — both a DCGM-compatible bundled exporter (JarvisLabs) and NVIDIA's official `dcgm-exporter` container image on one NVIDIA L4 (E2E Networks, driver 570.133.20) |
 
-All three adapters have now been run against a live endpoint. The remaining
-gaps are specific:
+All three adapters have now been run against a live endpoint, including GPU
+hardware. The remaining gaps are:
 
-- **GPU-backed Triton** has not been run. Triton's live validation is CPU-only,
-  where the server publishes no `nv_gpu_*` families at all, so the
-  `nv_gpu_utilization` ×100 conversion is still unverified against a real reading.
-- **Multi-GPU behaviour** has not been validated on hardware. Both L4 sessions
+- **Multi-GPU behaviour** has not been validated on hardware. All L4 sessions
   used a single-GPU node; a single-card capture proves nothing about
   max-across-devices aggregation, multi-GPU KV-cache pooling, or per-device
   attribution.
-- **Live counter rates against a real inference server** — the preemption-rate
-  and token-rate rules were validated end-to-end in the dynamic kind integration
-  test (`scripts/kind-dynamic-integration.sh`) against a synthetic server, and
-  independently confirmed by computing raw counter deltas over consecutive
-  captures from the E2E L4 session (see
-  `internal/runtime/vllm/testdata/e2e/README.md`), but IFA's own telemetry API
-  has not been exercised end-to-end against a live vLLM process in a real
-  Kubernetes cluster.
+- **Live Kubernetes E2E with KV-cache preemption** — `IFA-KV-001` was validated
+  in the dynamic kind integration test and via raw counter deltas in the E2E L4
+  session, but was not reproduced through IFA's telemetry API inside K3s because
+  `facebook/opt-125m` is too small to fill the L4's 20 GiB KV cache (≈ 0.23%
+  usage). A larger model or constrained `--num-gpu-blocks-override` would
+  reproduce it.
+- **GPU-backed Triton in Kubernetes** — GPU-backed Triton was validated as a
+  Docker container (direct `ifa check`). It has not been deployed as a
+  Kubernetes workload, so the Kubernetes discovery → Triton adapter → API path
+  has not been exercised.
 
-The NVIDIA official `dcgm-exporter` gap is now closed. See
-[`internal/runtime/dcgm/testdata/e2e/README.md`](../internal/runtime/dcgm/testdata/e2e/README.md)
+See
+[`internal/runtime/dcgm/testdata/e2e/README.md`](../internal/runtime/dcgm/testdata/e2e/README.md),
+[`internal/runtime/triton/testdata/e2e/README.md`](../internal/runtime/triton/testdata/e2e/README.md),
+and
+[`scripts/gpu-validation/evidence/k8s/README.md`](../scripts/gpu-validation/evidence/k8s/README.md)
 for full provenance.
-
-If you run GPU-backed Triton, `ifa check <url>` produces the report that would
-close that gap.
 
 ---
 
@@ -294,18 +293,68 @@ The adapter maps their absence to `OK == false` (unmeasured), not zero. GPU-depe
 rules do not fire on CPU deployments. The `nv_gpu_utilization` ×100 conversion
 cannot be verified without GPU hardware.
 
-**What this validation does not establish:**
+**What the CPU validation does not establish:**
 
-- GPU-backed Triton behavior
-- The `nv_gpu_utilization` ×100 conversion (no GPU to measure)
+- The `nv_gpu_utilization` ×100 conversion (no GPU to measure; verified in the
+  GPU run below)
 - Non-zero pending counts (echo model is too fast)
 - Multi-model label isolation on a live server
 - Dynamic-batcher behavior
-- TensorRT, PyTorch, or ONNX backend behavior
+- TensorRT or ONNX backend behavior
 
-The full Kubernetes discovery → scrape → recommendation path *is* validated, but
-with the vLLM adapter: the kind integration test serves a vLLM capture. No
-Triton target has been run through a cluster.
+### Live validation — GPU backend (one NVIDIA L4)
+
+The adapter was run against a real GPU-backed Triton server:
+
+- **Image:** `nvcr.io/nvidia/tritonserver:25.12-pyt-python-py3`
+- **GPU:** one NVIDIA L4 (24570 MiB), driver 570.133.20, CUDA 12.8
+- **Platform:** E2E Networks, Delhi NCR (`p95labs-ifa-l4-v2`)
+- **Backend:** LibTorch/PyTorch (`pytorch_libtorch`). The Python backend lacks
+  PyTorch in the official image; a TorchScript model was generated on the host
+  and served natively via LibTorch.
+- **Model:** `gpu_matmul` — random 128×128 matrix multiply, batch size 1,
+  TorchScript (`.pt`)
+- **Load:** 40 concurrent workers for 90 s; `44,432` successful requests, 0
+  errors
+
+`ifa check` against the live `/metrics` endpoint reported **37 metric families,
+0 unparseable lines**, and all 10 required Triton metric families found:
+
+```
+nv_inference_request_success         found
+nv_inference_request_failure         found
+nv_inference_pending_request_count   found
+nv_inference_request_duration_us     found
+nv_inference_queue_duration_us       found
+nv_gpu_utilization                   found  (0.02 during load)
+nv_gpu_memory_used_bytes             found  (306,184,192 under load)
+nv_gpu_memory_total_bytes            found  (24,152,899,584)
+nv_inference_request_summary_us      found
+nv_inference_queue_summary_us        found
+```
+
+Three verbatim `/metrics` payloads were captured in
+`internal/runtime/triton/testdata/e2e/`:
+
+| Fixture | State | Key values |
+|---|---|---|
+| `triton_gpu_l4_idle.txt` | Server started, 0 requests | `nv_gpu_utilization=0`, memory_used=270 MiB, pending=0 |
+| `triton_gpu_l4_under_load.txt` | 30,637 requests completed | `nv_gpu_utilization=0.02` (→IFA: 2%), pending=30, p95=109 ms, queue_p95=78 ms |
+| `triton_gpu_l4_recovery.txt` | After load, 44,434 total | `nv_gpu_utilization=0`, pending=0 |
+
+**`nv_gpu_utilization` ×100 conversion verified.** Triton reports `0.02`
+(fraction in [0,1]); IFA converts to `2%`. DCGM independently reported `2%`
+GPU utilisation for the same session, confirming the conversion is correct.
+The concern that `0.9` could be misread as `0.9%` instead of `90%` is closed.
+
+**What this validation does not establish:**
+
+- Non-zero error rates (no deliberate failure injection)
+- Multi-model label isolation on a live GPU server
+- Dynamic-batcher behavior (model is too fast to queue)
+- TensorRT or ONNX backend behavior
+- GPU-backed Triton deployed as a Kubernetes workload (only Docker-direct
+  `ifa check` was run; the Kubernetes discovery path was not exercised)
 
 ---
 
@@ -375,6 +424,56 @@ not be assumed to generalise; NVIDIA's own `dcgm-exporter` has not been measured
   so the max-across-devices logic is still fixture-only
 - GPU temperature or SM clock behaviour under real thermal load
 - Refresh characteristics of any other DCGM source
+
+---
+
+## Kubernetes end-to-end validation
+
+The full Kubernetes pipeline (discovery → scrape → rate tracking → rule
+evaluation → REST API) has been validated on real GPU hardware inside K3s.
+
+### Configuration validated
+
+- K3s v1.36.5+k3s1, single-node cluster (E2E Networks NVIDIA L4)
+- NVIDIA device plugin + CDI runtime (`nvidia.com/gpu: 1` advertised)
+- vLLM 0.28.0 pod with `resources.limits: {nvidia.com/gpu: "1"}`
+- Official NVIDIA DCGM exporter DaemonSet (without GPU resource request,
+  privileged mode)
+- IFA installed via `deploy/helm/ifa` with explicit `collector.targets`
+  referencing in-cluster ClusterIP URLs for vLLM and DCGM
+
+### Rules confirmed against live GPU telemetry
+
+| Rule | Confirmed | Conditions |
+|---|---|---|
+| `IFA-EFF-003` | **Yes** | GPU memory 92–94% (DCGM), threshold 90% |
+| `IFA-CAP-001` | **Yes** | `requests_waiting=63` + `gpu_util=91%`, sustained 60 s |
+| `IFA-CAP-003` | **Yes** | Queue grew 63 reqs/window, CRITICAL severity |
+| `IFA-LAT-001` | **Yes** | TTFT p95=888 ms, 89% queue share, threshold 500 ms |
+| `IFA-OBS-001` | **Yes** | TTFT/E2E metrics absent before first request |
+| `IFA-KV-001` | Not reproduced | OPT-125m KV footprint too small (≈ 0.23% of 20 GiB) |
+
+### Known configuration constraints
+
+**Service naming.** Do not name the vLLM Kubernetes Service `vllm`: Kubernetes
+injects `VLLM_PORT=tcp://<ip>:<port>` from the service name, which collides
+with vLLM v0.28.0's own internal `VLLM_PORT` environment variable and causes
+startup failure. Name the service `vllm-metrics` or any other name that does
+not match the process's own env-var namespace.
+
+**DCGM without GPU resource.** The DCGM DaemonSet needs `--privileged` and
+access to NVML/UVM devices but must NOT request `nvidia.com/gpu`, because the
+node has one GPU and vLLM must receive it. Use the Docker run flags
+`--gpus all --privileged` or, in Kubernetes, add privilege without a resource
+request.
+
+**K3s containerd runtime path.** The NVIDIA runtime configuration must be
+written to `/var/lib/rancher/k3s/agent/etc/containerd/config-v3.toml.d/`,
+not `/etc/containerd/config.d/`. K3s does not import the generic containerd
+drop-in directory.
+
+See `scripts/gpu-validation/evidence/k8s/README.md` for the full session
+provenance and raw API captures.
 
 ---
 

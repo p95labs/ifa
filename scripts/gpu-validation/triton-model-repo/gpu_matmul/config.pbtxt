@@ -1,0 +1,37 @@
+name: "gpu_matmul"
+backend: "python"
+max_batch_size: 16
+
+input [
+  {
+    name: "INPUT"
+    data_type: TYPE_FP32
+    dims: [ 128, 128 ]
+  }
+]
+
+output [
+  {
+    name: "OUTPUT"
+    data_type: TYPE_FP32
+    dims: [ 128, 128 ]
+  }
+]
+
+# Force CUDA execution — no CPU fallback.
+# KIND_GPU ensures Triton reports nv_gpu_utilization and nv_gpu_memory_used_bytes.
+instance_group [
+  {
+    kind: KIND_GPU
+    count: 1
+    gpus: [ 0 ]
+  }
+]
+
+# Dynamic batching: Triton will hold incoming requests until a preferred batch
+# size is reached (or max_queue_delay_microseconds elapses).  This lets us
+# produce a nonzero nv_inference_pending_request_count under concurrent load.
+dynamic_batching {
+  preferred_batch_size: [ 4, 8 ]
+  max_queue_delay_microseconds: 5000
+}

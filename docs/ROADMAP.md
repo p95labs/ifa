@@ -19,13 +19,13 @@ the single most important fact on this page.
 |---|---|
 | Prometheus exposition parsing — labels, histograms, summaries, edge cases | Locally validated |
 | Rule engine — 19 rules, suppression, sustained conditions | Locally validated |
-| vLLM adapter | Integration validated — vLLM 0.28.0 on a CPU backend (`facebook/opt-125m`) and on one NVIDIA L4 under KV-cache exhaustion |
-| Triton adapter | Integration validated — CPU backend, Triton 25.12, Python echo model; GPU-backed Triton not yet validated |
-| DCGM adapter | Integration validated — one NVIDIA L4 via a DCGM-*compatible* exporter; NVIDIA's own `dcgm-exporter` image not yet validated |
-| HTTP API, `/api/v1` and legacy paths | Integration validated — exercised over in-cluster networking by the kind test |
-| `ifa` CLI including `ifa check` | Integration validated — `ifa check` ran against live vLLM and Triton `/metrics` endpoints |
+| vLLM adapter | Integration validated — vLLM 0.28.0 on a CPU backend (`facebook/opt-125m`), on two NVIDIA L4 GPUs under KV-cache exhaustion, and inside a K3s cluster with DCGM |
+| Triton adapter | Integration validated — CPU backend, Triton 25.12, Python echo model; and GPU-backed Triton 25.12 on one NVIDIA L4 (TorchScript PyTorch backend, 44,432 requests, all 10 metric families confirmed by `ifa check`) |
+| DCGM adapter | Integration validated — one NVIDIA L4 via a DCGM-compatible exporter (JarvisLabs), via NVIDIA's official `dcgm-exporter:3.3.9-3.6.1-ubuntu22.04` on E2E Networks (PR #50), and as a Kubernetes DaemonSet supplying GPU metrics to IFA in-cluster |
+| HTTP API, `/api/v1` and legacy paths | Integration validated — exercised over in-cluster networking by the kind test and by the live K8s GPU session |
+| `ifa` CLI including `ifa check` | Integration validated — `ifa check` ran against live vLLM, Triton (CPU and GPU), and DCGM endpoints |
 | Self-metrics | Integration validated — `ifa_scrapes_total` asserted in the kind test |
-| Kubernetes discovery via informers | Integration validated — real API server in a kind cluster in CI |
+| Kubernetes discovery via informers | Integration validated — real API server in a kind cluster in CI, and against a K3s cluster with a real GPU-backed vLLM deployment |
 | Helm chart, RBAC, NetworkPolicy, security contexts | Integration validated for the default install path; NetworkPolicy itself is rendered and schema-checked, never enforced in CI |
 | Webhook alerting | Implemented |
 | TimescaleDB history | Implemented |
@@ -92,8 +92,6 @@ JarvisLabs' bundled DCGM-compatible exporter — **not** NVIDIA's official
 also measured lagging real GPU state by 18–20 seconds; see
 [`internal/runtime/dcgm/testdata/README.md`](../internal/runtime/dcgm/testdata/README.md).
 
-GPU-backed Triton remains unvalidated.
-
 ### Done: kind integration test in CI
 
 The chart is installed into a kind cluster in every CI run. A CPU-mode busybox
@@ -116,8 +114,8 @@ The Triton adapter was run against a real Triton 25.12 server:
   their absence to `OK == false` — rules depending on GPU metrics do not fire
 - `TestCapturedPayload` passes against all three captured fixtures
 
-GPU-backed Triton remains unvalidated. GPU-backed vLLM and a DCGM-compatible
-exporter have since been validated on one NVIDIA L4; see above.
+GPU-backed vLLM and a DCGM-compatible exporter have been validated on one NVIDIA
+L4; see above. GPU-backed Triton has since also been validated (see below).
 
 ### Done: dynamic multi-scrape validation in CI
 
@@ -183,9 +181,68 @@ A second vLLM GPU session was run in the same E2E environment:
   within 12 s of load stopping
 - Four verbatim captures committed: idle, KV-exhausted, settled, recovery
 
-### 1. Live dynamic validation with a real inference server
+### Done: GPU-backed Triton validation (one NVIDIA L4, E2E Networks)
 
-### 2. Per-pod GPU attribution
+The Triton adapter has been run against real GPU hardware:
+
+- E2E Networks GPU node (`p95labs-ifa-l4-v2`), Delhi NCR
+- `nvcr.io/nvidia/tritonserver:25.12-pyt-python-py3`
+- GPU: one NVIDIA L4 (24570 MiB), driver 570.133.20, CUDA 12.8
+- Model: `gpu_matmul` — TorchScript matrix multiplication exported via
+  `torch.jit.trace`, served through Triton's LibTorch/PyTorch backend
+  (`pytorch_libtorch` instance group, GPU=0). The Python backend lacks PyTorch
+  in the official image; the LibTorch backend runs the `.pt` file natively on
+  the GPU with zero Python dependencies.
+- Load: 40 concurrent workers for 90 seconds; 44,432 successful requests, 0
+  errors
+
+`ifa check` reported 37 metric families, 0 unparseable lines, and all 10
+required Triton metric families found, including all three GPU families:
+
+```
+nv_gpu_utilization         found  (0.02 → IFA converts ×100 → 2%)
+nv_gpu_memory_used_bytes   found  (306,184,192 under load)
+nv_gpu_memory_total_bytes  found  (24,152,899,584 = 24 GB L4)
+nv_inference_request_summary_us   found
+nv_inference_queue_summary_us     found
+```
+
+The `nv_gpu_utilization` ×100 conversion is now verified: `0.02` (Triton fraction)
+→ 2% (IFA percentage), corroborated by DCGM independently reporting 2%.
+
+Three verbatim captures in `internal/runtime/triton/testdata/e2e/` with
+provenance README. `TestCapturedPayloadGPU` asserts against all three.
+
+### Done: Live GPU Kubernetes E2E validation (one NVIDIA L4, K3s)
+
+The full Kubernetes pipeline has been validated on real GPU hardware:
+
+- E2E Networks GPU node (`p95labs-ifa-l4-v2`), K3s v1.36.5+k3s1 (single-node)
+- vLLM 0.28.0 pod scheduled with `nvidia.com/gpu: 1` via the NVIDIA device
+  plugin and CDI runtime
+- Official NVIDIA DCGM exporter (`dcgm-exporter:3.3.9-3.6.1-ubuntu22.04`) as a
+  DaemonSet, without consuming the GPU allocation (privileged mode only)
+- IFA installed via Helm (`deploy/helm/ifa`, chart 0.2.0-alpha.1, image built
+  from `main` at `cd6689f8`, imported into K3s containerd)
+- Target: `inference/opt-125m`, vLLM metrics URL + DCGM URL both in-cluster
+
+Scenario results:
+
+| Scenario | Rule | Result |
+|---|---|---|
+| A — Idle baseline | (none) | **PASS** — workload auto-discovered with `gpu_request=1`; GPU metrics live from DCGM |
+| B — GPU saturation | `IFA-CAP-001` | **PASS** — 63 requests waiting + GPU 91% sustained 60 s; finding in API with evidence block |
+| C — Growing queue | `IFA-CAP-003` | **PASS** — CRITICAL; queue grew 63 reqs per window |
+| D — KV preemption | `IFA-KV-001` | **NOT REPRODUCED** — OPT-125m KV footprint ≈ 0.23% of L4's 20 GiB KV cache |
+| E — Recovery | queue findings expire | **PASS** — `IFA-CAP-001`/`-003` gone after load stops |
+| F — Pod restart | workload rediscovery | **PASS** — pod replaced; telemetry resumes without fabricated rates |
+
+Additional findings confirmed live: `IFA-EFF-003` (GPU memory 92–94%, DCGM),
+`IFA-LAT-001` (TTFT p95=888 ms, 89% queue share).
+
+Raw API responses in `scripts/gpu-validation/evidence/k8s/`.
+
+### 1. Per-pod GPU attribution
 
 A DCGM Exporter endpoint reports the GPUs on a *node*, not the GPUs belonging to
 one pod. On a node running several inference workloads, the utilisation IFA
@@ -196,15 +253,7 @@ that the informer cache already has.
 Until this lands, GPU findings are trustworthy on dedicated GPU nodes and
 approximate on shared ones. The docs say so; the API does not yet.
 
-### 3. GPU-backed Triton
-
-Triton has been validated on CPU only, where it publishes no `nv_gpu_*` families
-at all, so the `nv_gpu_utilization` ×100 conversion has never been checked
-against a real reading. If you run GPU-backed Triton, `ifa check <url>` produces
-the report that would close this gap. NVIDIA's official `dcgm-exporter` has now
-been validated separately (see above).
-
-### 4. Per-workload thresholds
+### 2. Per-workload thresholds
 
 Thresholds are global. A batch scoring pipeline and an interactive chat endpoint
 have genuinely different definitions of "slow", and sharing one set means either
@@ -212,7 +261,7 @@ the batch workload is permanently on fire or the chat endpoint's real problems
 are under the line. A per-target override block, falling back to the global set,
 is the obvious shape.
 
-### 5. A finding lifecycle
+### 3. A finding lifecycle
 
 Findings are stateless: each request re-evaluates from scratch. IDs are stable
 while a condition holds, which is enough to deduplicate, but there is no
@@ -242,9 +291,9 @@ from someone who runs them and can check the output.
 
 ## Toward v1.0
 
-Not close. GPU-backed vLLM validation, real-cluster validation, and dynamic
-multi-scrape validation of the counter-rate rules are now done. What remains
-would need, at minimum: live dynamic validation against a real inference server
-under changing load; GPU-backed Triton; authentication on the API; per-workload
-thresholds; signed images and an SBOM; and a stable API used by somebody other
+Not close. GPU-backed vLLM validation, GPU-backed Triton validation, live
+Kubernetes E2E validation with real rule firings, and dynamic multi-scrape
+validation of the counter-rate rules are now done. What remains would need, at
+minimum: authentication on the API; per-workload thresholds; per-pod GPU
+attribution; signed images and an SBOM; and a stable API used by somebody other
 than the author.

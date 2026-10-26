@@ -1,0 +1,89 @@
+# IFA Helm values for the live GPU Kubernetes validation.
+#
+# This file is used by 03-k8s-deploy.sh.  It configures IFA to scrape the
+# GPU-backed vLLM pod deployed in the inference namespace and to read GPU
+# metrics from the official DCGM exporter in the gpu-operator namespace.
+#
+# Kubernetes auto-discovery is also enabled so IFA finds the vLLM Service
+# through its annotations without the target needing to be listed manually.
+
+image:
+  # Built from main directly on the node; tag is set by 03-k8s-deploy.sh.
+  repository: localhost/ifa
+  tag: gpu-validation
+  pullPolicy: Never
+
+replicaCount: 1
+
+config:
+  cluster_name: e2e-gpu-validation
+
+  logging:
+    level: info
+    format: json
+
+  collector:
+    interval: 15s
+    timeout: 10s
+    concurrency: 4
+    targets:
+      - name: vllm-opt-125m
+        namespace: inference
+        runtime: vllm
+        model_name: facebook/opt-125m
+        metrics_url: http://vllm.inference.svc:8000/metrics
+        dcgm_url: http://dcgm-exporter.gpu-operator.svc:9400/metrics
+
+  telemetry:
+    retention_samples: 120
+    retention_period: 15m
+
+  kubernetes:
+    enabled: true
+    namespace: inference
+    label_selector: ""
+    resync_period: 5m
+
+  database:
+    enabled: false
+
+  alerting:
+    enabled: false
+
+  recommender:
+    thresholds:
+      sustain_for: 30s
+      stale_after: 2m
+      queue_waiting_requests: 4
+      gpu_util_high_pct: 85
+      gpu_util_low_pct: 35
+      gpu_memory_high_pct: 90
+      kv_cache_high_pct: 90
+      preemptions_per_sec: 0.01
+      ttft_p95_ms: 1000
+      e2e_p95_ms: 10000
+      queue_share_of_ttft_pct: 50
+      tail_ratio_p99_p95: 3
+      tokens_per_second_low: 200
+      prefix_cache_hit_low_pct: 10
+      error_rate_pct: 2
+      abort_rate_pct: 5
+
+rbac:
+  create: true
+  scope: cluster
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+
+securityContext:
+  allowPrivilegeEscalation: false
+  privileged: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop:
+      - ALL
