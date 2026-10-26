@@ -1,0 +1,62 @@
+---
+# Official NVIDIA DCGM Exporter — deployed as a DaemonSet in the gpu-operator
+# namespace so IFA can reach it at dcgm-exporter.gpu-operator.svc:9400/metrics.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: dcgm-exporter
+  namespace: gpu-operator
+  labels:
+    app: dcgm-exporter
+spec:
+  selector:
+    matchLabels:
+      app: dcgm-exporter
+  template:
+    metadata:
+      labels:
+        app: dcgm-exporter
+    spec:
+      # DCGM requires privileged access to GPU devices.
+      hostNetwork: true
+      hostPID: true
+      containers:
+        - name: dcgm-exporter
+          image: nvcr.io/nvidia/k8s/dcgm-exporter:3.3.9-3.6.1-ubuntu22.04
+          env:
+            - name: DCGM_EXPORTER_LISTEN
+              value: ":9400"
+            - name: DCGM_EXPORTER_KUBERNETES
+              value: "false"
+          ports:
+            - name: metrics
+              containerPort: 9400
+              protocol: TCP
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: run-dcgm
+              mountPath: /run/dcgm
+      volumes:
+        - name: run-dcgm
+          hostPath:
+            path: /run/dcgm
+            type: DirectoryOrCreate
+      tolerations:
+        - operator: Exists
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dcgm-exporter
+  namespace: gpu-operator
+  labels:
+    app: dcgm-exporter
+spec:
+  selector:
+    app: dcgm-exporter
+  ports:
+    - name: metrics
+      port: 9400
+      targetPort: 9400
+  type: ClusterIP

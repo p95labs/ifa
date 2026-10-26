@@ -1,0 +1,114 @@
+# HELP nv_inference_request_success Number of successful inference requests, all batch sizes
+# TYPE nv_inference_request_success counter
+nv_inference_request_success{model="gpu_matmul",version="1"} 30637
+# HELP nv_inference_request_failure Number of failed inference requests, all batch sizes
+# TYPE nv_inference_request_failure counter
+nv_inference_request_failure{model="gpu_matmul",reason="OTHER",version="1"} 0
+nv_inference_request_failure{model="gpu_matmul",reason="BACKEND",version="1"} 0
+nv_inference_request_failure{model="gpu_matmul",reason="CANCELED",version="1"} 0
+nv_inference_request_failure{model="gpu_matmul",reason="REJECTED",version="1"} 0
+# HELP nv_inference_count Number of inferences performed (does not include cached requests)
+# TYPE nv_inference_count counter
+nv_inference_count{model="gpu_matmul",version="1"} 30637
+# HELP nv_inference_exec_count Number of model executions performed (does not include cached requests)
+# TYPE nv_inference_exec_count counter
+nv_inference_exec_count{model="gpu_matmul",version="1"} 2381
+# HELP nv_inference_request_duration_us Cumulative inference request duration in microseconds (includes cached requests)
+# TYPE nv_inference_request_duration_us counter
+nv_inference_request_duration_us{model="gpu_matmul",version="1"} 2817876430
+# HELP nv_inference_queue_duration_us Cumulative inference queuing duration in microseconds (includes cached requests)
+# TYPE nv_inference_queue_duration_us counter
+nv_inference_queue_duration_us{model="gpu_matmul",version="1"} 1958112615
+# HELP nv_inference_compute_input_duration_us Cumulative compute input duration in microseconds (does not include cached requests)
+# TYPE nv_inference_compute_input_duration_us counter
+nv_inference_compute_input_duration_us{model="gpu_matmul",version="1"} 4181961
+# HELP nv_inference_compute_infer_duration_us Cumulative compute inference duration in microseconds (does not include cached requests)
+# TYPE nv_inference_compute_infer_duration_us counter
+nv_inference_compute_infer_duration_us{model="gpu_matmul",version="1"} 13426081
+# HELP nv_inference_compute_output_duration_us Cumulative inference compute output duration in microseconds (does not include cached requests)
+# TYPE nv_inference_compute_output_duration_us counter
+nv_inference_compute_output_duration_us{model="gpu_matmul",version="1"} 4150436
+# HELP nv_energy_consumption GPU energy consumption in joules since the Triton Server started
+# TYPE nv_energy_consumption counter
+nv_energy_consumption{gpu_uuid="GPU-6e8f8724-3d7e-c654-de2b-1ffcf4487a6f"} 5494.746999999999
+# HELP nv_inference_pending_request_count Instantaneous number of pending requests awaiting execution per-model.
+# TYPE nv_inference_pending_request_count gauge
+nv_inference_pending_request_count{model="gpu_matmul",version="1"} 30
+# HELP nv_model_load_duration_secs Model load time in seconds
+# TYPE nv_model_load_duration_secs gauge
+nv_model_load_duration_secs{model="gpu_matmul",version="1"} 0.386054548
+# HELP nv_pinned_memory_pool_total_bytes Pinned memory pool total memory size, in bytes
+# TYPE nv_pinned_memory_pool_total_bytes gauge
+nv_pinned_memory_pool_total_bytes 268435456
+# HELP nv_pinned_memory_pool_used_bytes Pinned memory pool used memory size, in bytes
+# TYPE nv_pinned_memory_pool_used_bytes gauge
+nv_pinned_memory_pool_used_bytes 983040
+# HELP nv_gpu_utilization GPU utilization rate [0.0 - 1.0)
+# TYPE nv_gpu_utilization gauge
+nv_gpu_utilization{gpu_uuid="GPU-6e8f8724-3d7e-c654-de2b-1ffcf4487a6f"} 0.02
+# HELP nv_gpu_memory_total_bytes GPU total memory, in bytes
+# TYPE nv_gpu_memory_total_bytes gauge
+nv_gpu_memory_total_bytes{gpu_uuid="GPU-6e8f8724-3d7e-c654-de2b-1ffcf4487a6f"} 24152899584
+# HELP nv_gpu_memory_used_bytes GPU used memory, in bytes
+# TYPE nv_gpu_memory_used_bytes gauge
+nv_gpu_memory_used_bytes{gpu_uuid="GPU-6e8f8724-3d7e-c654-de2b-1ffcf4487a6f"} 306184192
+# HELP nv_gpu_power_usage GPU power usage in watts
+# TYPE nv_gpu_power_usage gauge
+nv_gpu_power_usage{gpu_uuid="GPU-6e8f8724-3d7e-c654-de2b-1ffcf4487a6f"} 32.206
+# HELP nv_gpu_power_limit GPU power management limit in watts
+# TYPE nv_gpu_power_limit gauge
+nv_gpu_power_limit{gpu_uuid="GPU-6e8f8724-3d7e-c654-de2b-1ffcf4487a6f"} 72
+# HELP nv_cpu_utilization CPU utilization rate [0.0 - 1.0]
+# TYPE nv_cpu_utilization gauge
+nv_cpu_utilization 0.09851226377161239
+# HELP nv_cpu_memory_total_bytes CPU total memory (RAM), in bytes
+# TYPE nv_cpu_memory_total_bytes gauge
+nv_cpu_memory_total_bytes 108052938752
+# HELP nv_cpu_memory_used_bytes CPU used memory (RAM), in bytes
+# TYPE nv_cpu_memory_used_bytes gauge
+nv_cpu_memory_used_bytes 3052593152
+# HELP nv_inference_request_summary_us Summary of inference request duration in microseconds (includes cached requests)
+# TYPE nv_inference_request_summary_us summary
+nv_inference_request_summary_us_count{model="gpu_matmul",version="1"} 30637
+nv_inference_request_summary_us_sum{model="gpu_matmul",version="1"} 2817876430
+nv_inference_request_summary_us{model="gpu_matmul",version="1",quantile="0.5"} 91127
+nv_inference_request_summary_us{model="gpu_matmul",version="1",quantile="0.9"} 105826
+nv_inference_request_summary_us{model="gpu_matmul",version="1",quantile="0.95"} 109233
+nv_inference_request_summary_us{model="gpu_matmul",version="1",quantile="0.99"} 117378
+nv_inference_request_summary_us{model="gpu_matmul",version="1",quantile="0.999"} 131449
+# HELP nv_inference_queue_summary_us Summary of inference queuing duration in microseconds (includes cached requests)
+# TYPE nv_inference_queue_summary_us summary
+nv_inference_queue_summary_us_count{model="gpu_matmul",version="1"} 30637
+nv_inference_queue_summary_us_sum{model="gpu_matmul",version="1"} 1958112615
+nv_inference_queue_summary_us{model="gpu_matmul",version="1",quantile="0.5"} 64527
+nv_inference_queue_summary_us{model="gpu_matmul",version="1",quantile="0.9"} 75982
+nv_inference_queue_summary_us{model="gpu_matmul",version="1",quantile="0.95"} 78308
+nv_inference_queue_summary_us{model="gpu_matmul",version="1",quantile="0.99"} 84482
+nv_inference_queue_summary_us{model="gpu_matmul",version="1",quantile="0.999"} 98020
+# HELP nv_inference_compute_input_summary_us Cumulative compute input duration in microseconds (does not include cached requests)
+# TYPE nv_inference_compute_input_summary_us summary
+nv_inference_compute_input_summary_us_count{model="gpu_matmul",version="1"} 30637
+nv_inference_compute_input_summary_us_sum{model="gpu_matmul",version="1"} 4181961
+nv_inference_compute_input_summary_us{model="gpu_matmul",version="1",quantile="0.5"} 134
+nv_inference_compute_input_summary_us{model="gpu_matmul",version="1",quantile="0.9"} 175
+nv_inference_compute_input_summary_us{model="gpu_matmul",version="1",quantile="0.95"} 189
+nv_inference_compute_input_summary_us{model="gpu_matmul",version="1",quantile="0.99"} 236
+nv_inference_compute_input_summary_us{model="gpu_matmul",version="1",quantile="0.999"} 749
+# HELP nv_inference_compute_infer_summary_us Cumulative compute inference duration in microseconds (does not include cached requests)
+# TYPE nv_inference_compute_infer_summary_us summary
+nv_inference_compute_infer_summary_us_count{model="gpu_matmul",version="1"} 30637
+nv_inference_compute_infer_summary_us_sum{model="gpu_matmul",version="1"} 13426081
+nv_inference_compute_infer_summary_us{model="gpu_matmul",version="1",quantile="0.5"} 427
+nv_inference_compute_infer_summary_us{model="gpu_matmul",version="1",quantile="0.9"} 486
+nv_inference_compute_infer_summary_us{model="gpu_matmul",version="1",quantile="0.95"} 497
+nv_inference_compute_infer_summary_us{model="gpu_matmul",version="1",quantile="0.99"} 528
+nv_inference_compute_infer_summary_us{model="gpu_matmul",version="1",quantile="0.999"} 1459
+# HELP nv_inference_compute_output_summary_us Cumulative inference compute output duration in microseconds (does not include cached requests)
+# TYPE nv_inference_compute_output_summary_us summary
+nv_inference_compute_output_summary_us_count{model="gpu_matmul",version="1"} 30637
+nv_inference_compute_output_summary_us_sum{model="gpu_matmul",version="1"} 4150436
+nv_inference_compute_output_summary_us{model="gpu_matmul",version="1",quantile="0.5"} 121
+nv_inference_compute_output_summary_us{model="gpu_matmul",version="1",quantile="0.9"} 205
+nv_inference_compute_output_summary_us{model="gpu_matmul",version="1",quantile="0.95"} 224
+nv_inference_compute_output_summary_us{model="gpu_matmul",version="1",quantile="0.99"} 273
+nv_inference_compute_output_summary_us{model="gpu_matmul",version="1",quantile="0.999"} 917

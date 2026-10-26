@@ -1,0 +1,1 @@
+{"items":[{"name":"vllm","namespace":"inference","replicas":1,"ready_replicas":1,"restart_count":0,"gpu_request":"1","labels":{"app":"vllm","ifa.p95labs.com/runtime":"vllm"},"last_updated":"2026-10-26T19:11:46.055120049Z"}],"count":1,"generated_at":"2026-10-26T19:11:46.055149869Z"}
