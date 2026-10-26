@@ -226,16 +226,16 @@ Alpha. It works, it is tested, and it is honest about what it has not proven.
 | Area | Status |
 | --- | --- |
 | Prometheus exposition parsing | Implemented and tested against fixtures, live captures, and edge cases |
-| vLLM adapter | Validated against live vLLM 0.28.0 on CPU and on one NVIDIA L4 under KV-cache exhaustion |
-| Triton adapter | Validated against live Triton 25.12 on CPU; GPU-backed Triton not yet validated |
-| DCGM adapter | Validated against a DCGM-compatible exporter on one NVIDIA L4; NVIDIA's own dcgm-exporter not yet validated |
+| vLLM adapter | Validated against live vLLM 0.28.0 on CPU and on NVIDIA L4 hardware across two independent sessions (JarvisLabs and E2E Networks), including 100% KV-cache exhaustion, active preemptions (~280–300/s), and recovery |
+| Triton adapter | Validated against live Triton 25.12 on CPU and on an NVIDIA L4 GPU (LibTorch/TorchScript model, 44,432 requests, `nv_gpu_utilization` fraction-to-percentage conversion corroborated against DCGM) |
+| DCGM adapter | Validated on NVIDIA L4 hardware against NVIDIA's official `dcgm-exporter` (`3.3.9-3.6.1-ubuntu22.04`) as well as a JarvisLabs DCGM-compatible exporter |
 | Rule engine | Implemented, boundary-tested, exercised end to end by the demo and in a real cluster in CI at shipped default thresholds, including suppression |
-| Kubernetes discovery | Validated end to end in a real kind cluster in CI using Kubernetes 1.31 |
+| Kubernetes discovery & live GPU E2E | Validated in CI on `kind` (Kubernetes 1.31) and end to end in a single-node GPU-enabled K3s cluster on an NVIDIA L4 (Helm install + vLLM 0.28.0 + official `dcgm-exporter` DaemonSet, firing `IFA-CAP-001`, `IFA-CAP-003`, `IFA-EFF-003`, and `IFA-LAT-001` via the REST API) |
+| Counter-rate / queue-growth rules | Validated via deterministic dynamic multi-scrape integration tests in `kind`, raw timestamped L4 captures (~280–300 preemptions/s), and `IFA-CAP-003` firing live in the GPU K3s run |
 | Webhook alerting | Implemented — transition-based, deduplicated, bounded queue; no live endpoint integration test |
-| Counter-rate / queue-growth rules | Implemented, but not yet validated against live time-separated deltas |
-| TimescaleDB history | Implemented, bounded, non-blocking; no integration test yet |
+| TimescaleDB history | Implemented, bounded, non-blocking; no integration test against a real TimescaleDB yet |
 
-Live validation currently covers vLLM 0.28.0 on CPU and on one NVIDIA L4 at ≈99.9% KV-cache occupancy with capacity-driven queueing and active preemption, Triton 25.12 on CPU, a DCGM-compatible exporter on the L4, and the full Kubernetes path in CI. Four things that are deliberately *not* claimed: one L4 is one card and says nothing about multi-GPU behaviour; the GPU captures are snapshots, so no counter rate — preemptions, throughput, queue growth — has ever been measured live; the DCGM exporter was a DCGM-*compatible* one bundled by the GPU host, not NVIDIA's official image; and GPU-backed Triton has not been run at all. The TimescaleDB path has no integration test.
+Live GPU validation covers NVIDIA L4 cards across two providers (JarvisLabs and E2E Networks): vLLM 0.28.0 under KV-cache exhaustion and sustained load, GPU-backed Triton 25.12, NVIDIA's official `dcgm-exporter`, and an end-to-end Helm deployment in a GPU-enabled K3s cluster. What is deliberately *not* claimed: multi-GPU behaviour and per-pod GPU attribution on shared nodes, `IFA-KV-001` reproduced through IFA *inside* Kubernetes (preemption was measured on the L4 outside the cluster, whereas the small `opt-125m` model in the K3s run peaked near 0.23% of the cache), high-saturation Triton rule evaluation, a real TimescaleDB integration test, and external customer or design-partner validation.
 
 ## Known limitations
 
@@ -243,7 +243,7 @@ Live validation currently covers vLLM 0.28.0 on CPU and on one NVIDIA L4 at ≈9
 - One instance holds telemetry in memory; running two replicas gives you two independent views, not a shared one. The chart uses `Recreate` for this reason.
 - Percentiles from histogram-backed runtimes are interpolated from bucket boundaries and inherit their resolution. A p95 that lands in vLLM's `+Inf` bucket is reported as the largest finite boundary, which understates it.
 - Without a DCGM endpoint, GPU utilisation and memory are simply not measured, and the rules that need them do not run. IFA reports that rather than substituting a proxy.
-- **A DCGM endpoint can read late.** The exporter measured on an L4 lagged real GPU state by 18–20 seconds. A `collector.interval` or `sustain_for` shorter than your exporter's refresh lag will report a saturated GPU as idle, which is precisely what `IFA-CAP-002` looks for. Size both above it. The figure is specific to that exporter; measure your own.
+- **A bundled DCGM endpoint can read late.** On one GPU host's bundled DCGM-compatible exporter, GPU readings lagged real state by 18–20 seconds (NVIDIA's official `dcgm-exporter` showed no such delay on a separate L4). A `collector.interval` or `sustain_for` shorter than your exporter's refresh lag will report a saturated GPU as idle, which is precisely what `IFA-CAP-002` looks for. Size both above it and measure your own exporter.
 - GPU attribution is per-node, not per-pod. A DCGM endpoint reports the GPUs on a node, so on a node running several inference workloads the utilisation attributed to a target may belong to something else. Trustworthy on dedicated GPU nodes.
 - vLLM exposes no failure counter, so no error rate is derived for vLLM targets. The abort share is reported instead.
 - Thresholds are global, not per-workload. A batch pipeline and a chat endpoint currently share one definition of "slow".
