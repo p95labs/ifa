@@ -307,3 +307,122 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
           govulncheck ./...
+
+  timescaledb-integration:
+    name: TimescaleDB integration
+    runs-on: ubuntu-latest
+    # Image: timescale/timescaledb:2.14.2-pg16
+    # PostgreSQL: 16.2   TimescaleDB: 2.14.2
+    # No paid infrastructure, no external secrets.
+    services:
+      timescaledb:
+        image: timescale/timescaledb:2.14.2-pg16
+        env:
+          POSTGRES_DB: ifa_test
+          POSTGRES_USER: ifa_test
+          POSTGRES_PASSWORD: ifa_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ifa_test -d ifa_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # Apply the migration before running any tests. IFA never runs migrations
+      # itself; this mirrors the operator workflow documented in DEPLOYMENT.md.
+      - name: Apply migration
+        run: |
+          sudo apt-get install -y --no-install-recommends postgresql-client
+          psql "postgres://ifa_test:ifa_test@localhost:5432/ifa_test?sslmode=disable" \
+            -f migrations/001_init.sql
+          echo "Migration applied"
+
+      # Verify the schema before the Go tests run. Failures here catch a schema
+      # drift between the migration and the insert statement before spending time
+      # on the full test suite.
+      - name: Verify schema (hypertable, columns, index)
+        run: |
+          HYPER=$(psql "postgres://ifa_test:ifa_test@localhost:5432/ifa_test?sslmode=disable" \
+            -tA -c "SELECT count(*) FROM timescaledb_information.hypertables WHERE hypertable_name='telemetry_snapshots'")
+          [ "${HYPER}" = "1" ] || { echo "hypertable not created (count=${HYPER})"; exit 1; }
+          echo "✓ telemetry_snapshots is a hypertable"
+
+          IDX=$(psql "postgres://ifa_test:ifa_test@localhost:5432/ifa_test?sslmode=disable" \
+            -tA -c "SELECT count(*) FROM pg_indexes WHERE tablename='telemetry_snapshots' AND indexname='idx_telemetry_workload'")
+          [ "${IDX}" = "1" ] || { echo "idx_telemetry_workload missing (count=${IDX})"; exit 1; }
+          echo "✓ idx_telemetry_workload exists"
+
+          COLS=$(psql "postgres://ifa_test:ifa_test@localhost:5432/ifa_test?sslmode=disable" \
+            -tA -c "SELECT count(*) FROM information_schema.columns WHERE table_name='telemetry_snapshots'")
+          [ "${COLS}" -ge 28 ] || { echo "expected ≥28 columns, got ${COLS}"; exit 1; }
+          echo "✓ ${COLS} columns present (expected ≥28)"
+
+      # Run the full integration-tagged test suite, including:
+      #   • Migration idempotency
+      #   • Persistence of all 28 columns
+      #   • NULL vs zero semantics
+      #   • Multiple workloads and timestamps
+      #   • Reconnect retention
+      #   • Store→sink→database pipeline
+      #   • Outage: startup failure, failed-write counting, queue-bounded
+      #   • Container-stop outage (Docker is available on ubuntu-latest)
+      #   • In-memory store unaffected by database failure
+      #   • Queue saturation and graceful shutdown
+      - name: Run TimescaleDB integration tests
+        env:
+          TIMESCALE_TEST_DSN: postgres://ifa_test:ifa_test@localhost:5432/ifa_test?sslmode=disable
+        run: |
+          go test -tags integration -race -count=1 -v \
+            -timeout 180s \
+            ./internal/storage/timescale/...
+
+      # Verify the Helm chart does not leak the DSN into the ConfigMap when
+      # database.existingSecret is set. The DSN is injected via secretKeyRef
+      # instead.
+      - name: Verify Helm Secret wiring (DSN not in ConfigMap)
+        run: |
+          curl -sSLo /tmp/helm.tar.gz \
+            https://get.helm.sh/helm-v3.16.3-linux-amd64.tar.gz
+          tar -xzf /tmp/helm.tar.gz -C /tmp
+          sudo install -m 755 /tmp/linux-amd64/helm /usr/local/bin/helm
+
+          CONFIGMAP=$(helm template ifa deploy/helm/ifa \
+            --set database.existingSecret=ifa-db \
+            --set config.database.enabled=true \
+            | awk '/kind: ConfigMap/{found=1} found{print; if(/^---/)exit}')
+
+          if echo "${CONFIGMAP}" | grep -qE 'postgres://'; then
+            echo "FAIL: ConfigMap contains a postgres:// DSN"
+            exit 1
+          fi
+          if echo "${CONFIGMAP}" | grep -qE 'dsn:\s+"[^"]'; then
+            echo "FAIL: ConfigMap database.dsn has a non-empty value"
+            exit 1
+          fi
+          echo "✓ ConfigMap has no populated postgres:// DSN"
+
+          DEPLOY=$(helm template ifa deploy/helm/ifa \
+            --set database.existingSecret=ifa-db \
+            --set config.database.enabled=true \
+            | awk '/kind: Deployment/{found=1} found{print; if(/^---/)exit}')
+          if ! echo "${DEPLOY}" | grep -q "secretKeyRef"; then
+            echo "FAIL: Deployment does not use secretKeyRef for IFA_DATABASE_DSN"
+            exit 1
+          fi
+          echo "✓ Deployment uses secretKeyRef for IFA_DATABASE_DSN"
+
+      - name: TimescaleDB and PostgreSQL versions
+        if: always()
+        run: |
+          psql "postgres://ifa_test:ifa_test@localhost:5432/ifa_test?sslmode=disable" \
+            -c "SELECT extname, extversion FROM pg_extension WHERE extname='timescaledb';" \
+            -c "SHOW server_version;"

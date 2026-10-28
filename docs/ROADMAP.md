@@ -28,7 +28,7 @@ the single most important fact on this page.
 | Kubernetes discovery via informers | Integration validated — real API server in a kind cluster in CI, and against a K3s cluster with a real GPU-backed vLLM deployment |
 | Helm chart, RBAC, NetworkPolicy, security contexts | Integration validated for the default install path; NetworkPolicy itself is rendered and schema-checked, never enforced in CI |
 | Webhook alerting | Implemented |
-| TimescaleDB history | Implemented |
+| TimescaleDB history | Integration validated — real TimescaleDB 2.14.2-pg16, migration verified, all 28 columns persisted, NULL/zero semantics confirmed, outage and recovery tested, CI job runs on every push |
 | Counter-rate and queue-growth rules | Integration validated — exercised through actual collector scrapes in the dynamic kind integration test; see below |
 | Demo and its end-to-end test | Locally validated |
 
@@ -242,6 +242,49 @@ Additional findings confirmed live: `IFA-EFF-003` (GPU memory 92–94%, DCGM),
 
 Raw API responses in `scripts/gpu-validation/evidence/k8s/`.
 
+### Done: TimescaleDB real-database integration validation
+
+The optional TimescaleDB sink has been validated against a real database
+(not mocked, not ordinary PostgreSQL):
+
+- Image: `timescale/timescaledb:2.14.2-pg16` (PostgreSQL 16.2, TimescaleDB 2.14.2)
+- Migration (`migrations/001_init.sql`) applied and verified: extension loaded,
+  `telemetry_snapshots` is a hypertable, 28 columns match the insert statement,
+  `idx_telemetry_workload` exists, migration reruns safely
+- All 28 columns persisted and queried back via SQL, including identity fields,
+  all latency percentiles, GPU metrics, KV-cache metrics, and replica counts
+- NULL vs zero semantics verified: unmeasured `Metric{}` → SQL `NULL`;
+  `Observed(0)` → numeric `0`; `Observed(42.5)` → `42.5`
+- Multiple workloads and multiple timestamps tested and queried
+- Reconnect retention confirmed: rows written through a closed sink remain
+  accessible when a fresh sink opens against the same database
+- Full `store.Add()` → `Sink.Write()` → TimescaleDB pipeline exercised through
+  production code (not the sink directly)
+- In-memory store and database store confirmed independent: a failing sink does
+  not affect `store.Latest()`, `store.History()`, or the rule engine
+- Outage tests:
+  - `Open()` with an unreachable DSN fails fast; error message does not leak
+    the password
+  - Failed writes are counted (`ifa_database_failed_total`), not retried
+  - Queue stays bounded; `Write()` never blocks the collector
+  - Container-stop outage confirmed: writes fail during outage, recovery sink on
+    the restarted database succeeds
+- Queue saturation: dropped counter increments, `Write()` remains non-blocking
+- Graceful shutdown: `Close()` drains all queued writes before returning; all
+  10 queued rows reach the database
+- Helm Secret wiring confirmed: `database.existingSecret` causes `IFA_DATABASE_DSN`
+  to come from `secretKeyRef`; ConfigMap contains no populated postgres:// DSN
+- CI job `timescaledb-integration` added to `.github/workflows/ci.yml`: starts
+  an ephemeral TimescaleDB service container, applies the migration, runs the
+  full `-tags integration` suite including the container-stop outage test, and
+  verifies Helm Secret wiring — no paid infrastructure, no external secrets
+
+**What this does not establish.** Historical rows are not replayed after an
+outage — by design. Retention policies, automatic deletion, and multi-tenant
+row isolation are not configured. TimescaleDB compression and continuous
+aggregates are not tested. These are operator concerns and are not part of IFA's
+default configuration.
+
 ### 1. Per-pod GPU attribution
 
 A DCGM Exporter endpoint reports the GPUs on a *node*, not the GPUs belonging to
@@ -292,8 +335,8 @@ from someone who runs them and can check the output.
 ## Toward v1.0
 
 Not close. GPU-backed vLLM validation, GPU-backed Triton validation, live
-Kubernetes E2E validation with real rule firings, and dynamic multi-scrape
-validation of the counter-rate rules are now done. What remains would need, at
-minimum: authentication on the API; per-workload thresholds; per-pod GPU
-attribution; signed images and an SBOM; and a stable API used by somebody other
-than the author.
+Kubernetes E2E validation with real rule firings, dynamic multi-scrape validation
+of the counter-rate rules, and real TimescaleDB integration validation are now
+done. What remains would need, at minimum: authentication on the API; per-workload
+thresholds; per-pod GPU attribution; signed images and an SBOM; and a stable API
+used by somebody other than the author.

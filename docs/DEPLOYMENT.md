@@ -156,30 +156,145 @@ would be security theatre.
 
 ## Optional history
 
+IFA can write every scrape snapshot to a TimescaleDB database for long-term
+retention and ad-hoc SQL queries. This feature is validated against
+**timescale/timescaledb:2.14.2-pg16** (PostgreSQL 16.2, TimescaleDB 2.14.2).
+
+### What it does and does not do
+
+- Every snapshot that the collector produces is forwarded to TimescaleDB over a
+  bounded asynchronous queue (default depth: 1024). Inserts are non-blocking.
+- The **rule engine reads only the in-memory store**, not the database. A
+  database outage degrades history retention, not live diagnostics.
+- IFA does **not** guarantee zero data loss during an outage. Snapshots that
+  cannot be queued are dropped and counted in `ifa_database_dropped_total`.
+  Snapshots that are queued but not yet written when the database goes away are
+  also lost. This is intentional — an unbounded retry queue would consume
+  unbounded memory and backfill stale telemetry behind fresh telemetry when the
+  database recovers.
+
+### Step 1 — Apply the migration
+
+IFA never applies migrations itself. Granting the control plane DDL rights on a
+database it only ever appends to would widen its blast radius for no benefit.
+
+Apply `migrations/001_init.sql` as the database owner before enabling IFA:
+
+```bash
+psql "postgres://dbowner:...@timescaledb.svc:5432/ifa?sslmode=require" \
+  -f migrations/001_init.sql
+```
+
+The migration is idempotent (`CREATE … IF NOT EXISTS`, `if_not_exists => TRUE`),
+so re-running it on an existing database is safe. To verify it applied:
+
+```sql
+-- Confirm TimescaleDB extension is present.
+SELECT extname, extversion FROM pg_extension WHERE extname = 'timescaledb';
+
+-- Confirm telemetry_snapshots is a hypertable (not a plain table).
+SELECT hypertable_name FROM timescaledb_information.hypertables
+WHERE hypertable_name = 'telemetry_snapshots';
+
+-- Confirm the workload-history index exists.
+SELECT indexname FROM pg_indexes
+WHERE tablename = 'telemetry_snapshots' AND indexname = 'idx_telemetry_workload';
+```
+
+### Step 2 — Create the Kubernetes Secret
+
+The DSN carries a password. Store it in a Secret rather than a ConfigMap:
+
 ```bash
 kubectl -n inference create secret generic ifa-db \
-  --from-literal=dsn='postgres://ifa:...@timescaledb.timescaledb.svc:5432/ifa?sslmode=require'
-
-psql "$DSN" -f migrations/001_init.sql
+  --from-literal=dsn='postgres://ifa:...@timescaledb.svc:5432/ifa?sslmode=require'
 ```
+
+### Step 3 — Enable in Helm values
 
 ```yaml
 database:
-  existingSecret: ifa-db
+  existingSecret: ifa-db   # name of the Secret above
+  secretKey: dsn            # key inside the Secret (default: dsn)
+
 config:
   database:
     enabled: true
-    queue_size: 1024
+    queue_size: 1024        # snapshots buffered before dropping; default 1024
 ```
 
-IFA never runs migrations. Granting the control plane DDL rights on a database
-it only ever appends to would widen its blast radius for no benefit.
+IFA reads the DSN from the environment variable `IFA_DATABASE_DSN`, which the
+Helm chart injects via `secretKeyRef`. The DSN never appears in the ConfigMap.
 
-The rule engine never reads from the database — it only reads the in-memory
-window — so an outage costs history, not diagnostics. Watch
-`ifa_database_dropped_total` to know whether history is complete. Startup *does*
-fail if the database is enabled and unreachable, because enabling history and
-silently not writing it is worse than a clear failure.
+Startup **fails immediately** if the database is enabled and unreachable. This
+is intentional: enabling history and silently not writing it is worse than a
+clear failure at startup.
+
+### Querying stored history
+
+```sql
+-- Most recent snapshots for one workload.
+SELECT time, request_rate_per_sec, kv_cache_usage_percent, gpu_utilization_percent
+FROM telemetry_snapshots
+WHERE namespace = 'inference' AND workload_name = 'chat-llama3'
+ORDER BY time DESC
+LIMIT 100;
+
+-- Average KV-cache usage per workload over the last hour.
+-- AVG() skips NULLs, so unmeasured values do not drag the average to zero.
+SELECT workload_name, AVG(kv_cache_usage_percent) AS avg_kv
+FROM telemetry_snapshots
+WHERE time > NOW() - INTERVAL '1 hour'
+GROUP BY workload_name;
+```
+
+**NULL versus zero.** Every measurement column is nullable. `NULL` means "the
+runtime did not report this metric for this scrape". Numeric `0` means "the
+runtime reported it and it was zero". Always use `AVG(col)` rather than
+`AVG(COALESCE(col, 0))` — the latter silently turns missing data into idle-looking
+data and produces wrong averages.
+
+### Monitoring database health
+
+Three Prometheus counters track the sink:
+
+| Metric | Meaning |
+|---|---|
+| `ifa_database_written_total` | Snapshots successfully persisted |
+| `ifa_database_failed_total` | Insert errors (timeout, connection refused, etc.) |
+| `ifa_database_dropped_total` | Snapshots discarded because the queue was full |
+
+Non-zero `ifa_database_dropped_total` means the database is too slow or
+unreachable and the queue has filled. Non-zero `ifa_database_failed_total` means
+individual inserts are failing — check database connectivity and logs.
+
+### Outage behaviour
+
+When the database becomes unavailable after a successful startup:
+
+1. Pending inserts time out (default: 5 s per insert) and are counted as failed.
+2. New snapshots enqueue normally. If the queue fills before the database
+   recovers, additional snapshots are dropped.
+3. The **collector, rule engine, and REST API are unaffected** — they read the
+   in-memory store, not the database.
+4. When the database recovers, the next insert succeeds and the sink resumes
+   without any restart.
+
+Historical snapshots written before the outage remain in the database. Snapshots
+that were dropped during the outage are permanently lost; IFA does not replay
+them when the connection is restored.
+
+### Reproducing the integration tests locally
+
+```bash
+# Requires Docker and Go (same version as CI).
+bash scripts/timescale-integration.sh
+```
+
+The script starts a `timescale/timescaledb:2.14.2-pg16` container, applies the
+migration, runs `go test -tags integration -race ./internal/storage/timescale/...`,
+verifies the Helm Secret wiring, and cleans up. It exits 0 only when all tests
+pass.
 
 ## Verifying an install
 
