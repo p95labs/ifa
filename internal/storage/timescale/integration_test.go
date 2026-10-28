@@ -345,12 +345,12 @@ func TestIntegration_Persistence_AllColumns(t *testing.T) {
 		RequestRatePerSec: telemetry.Observed(42.5),
 		TokensPerSecond:   telemetry.Observed(1234.0),
 
-		P50LatencyMs: telemetry.Observed(10.1),
-		P95LatencyMs: telemetry.Observed(25.5),
-		P99LatencyMs: telemetry.Observed(50.0),
-		TTFTP50Ms:    telemetry.Observed(5.0),
-		TTFTP95Ms:    telemetry.Observed(12.5),
-		TTFTP99Ms:    telemetry.Observed(20.0),
+		P50LatencyMs:   telemetry.Observed(10.1),
+		P95LatencyMs:   telemetry.Observed(25.5),
+		P99LatencyMs:   telemetry.Observed(50.0),
+		TTFTP50Ms:      telemetry.Observed(5.0),
+		TTFTP95Ms:      telemetry.Observed(12.5),
+		TTFTP99Ms:      telemetry.Observed(20.0),
 		QueueTimeP95Ms: telemetry.Observed(3.7),
 
 		RequestsRunning:    telemetry.Observed(16.0),
@@ -358,10 +358,10 @@ func TestIntegration_Persistence_AllColumns(t *testing.T) {
 		WaitingForCapacity: telemetry.Observed(2.0),
 		WaitingDeferred:    telemetry.Observed(0.0), // measured zero — must not become NULL
 
-		GPUUtilizationPct: telemetry.Observed(87.3),
-		GPUMemoryUsedPct:  telemetry.Observed(91.1),
-		KVCacheUsagePct:   telemetry.Observed(75.0),
-		PreemptionsPerSec: telemetry.Observed(0.5),
+		GPUUtilizationPct:     telemetry.Observed(87.3),
+		GPUMemoryUsedPct:      telemetry.Observed(91.1),
+		KVCacheUsagePct:       telemetry.Observed(75.0),
+		PreemptionsPerSec:     telemetry.Observed(0.5),
 		PrefixCacheHitRatePct: telemetry.Observed(60.0),
 
 		ErrorRatePct: telemetry.Observed(0.01),
@@ -742,12 +742,12 @@ func TestIntegration_Pipeline_StoreToDatabase(t *testing.T) {
 	// Simulate three successive scrape cycles.
 	for i := range 3 {
 		store.Add(telemetry.Snapshot{
-			Timestamp:    time.Now().UTC().Add(time.Duration(i) * time.Second),
-			ClusterName:  "prod",
-			Namespace:    ns,
-			WorkloadName: wl,
-			Runtime:      telemetry.RuntimeVLLM,
-			ModelName:    "llama3",
+			Timestamp:       time.Now().UTC().Add(time.Duration(i) * time.Second),
+			ClusterName:     "prod",
+			Namespace:       ns,
+			WorkloadName:    wl,
+			Runtime:         telemetry.RuntimeVLLM,
+			ModelName:       "llama3",
 			KVCacheUsagePct: telemetry.Observed(float64(10 + i*5)),
 			RequestsRunning: telemetry.Observed(float64(i + 1)),
 		})
@@ -819,10 +819,10 @@ func TestIntegration_Pipeline_DatabaseAndInMemoryIndependent(t *testing.T) {
 	wl := uniqueName("no-sink")
 	for i := range 5 {
 		store.Add(telemetry.Snapshot{
-			Timestamp:    time.Now().UTC(),
-			ClusterName:  "test",
-			Namespace:    "test",
-			WorkloadName: wl,
+			Timestamp:       time.Now().UTC(),
+			ClusterName:     "test",
+			Namespace:       "test",
+			WorkloadName:    wl,
 			RequestsRunning: telemetry.Observed(float64(i)),
 		})
 	}
@@ -1103,10 +1103,10 @@ func TestIntegration_Outage_InMemoryUnaffected(t *testing.T) {
 	wl := uniqueName("in-memory-ok")
 	for i := range 5 {
 		store.Add(telemetry.Snapshot{
-			Timestamp:    time.Now().UTC(),
-			ClusterName:  "test",
-			Namespace:    "test",
-			WorkloadName: wl,
+			Timestamp:       time.Now().UTC(),
+			ClusterName:     "test",
+			Namespace:       "test",
+			WorkloadName:    wl,
 			KVCacheUsagePct: telemetry.Observed(float64(i * 10)),
 		})
 	}
