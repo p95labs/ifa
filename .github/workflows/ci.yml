@@ -426,3 +426,58 @@ jobs:
           psql "postgres://ifa_test:ifa_test@localhost:5432/ifa_test?sslmode=disable" \
             -c "SELECT extname, extversion FROM pg_extension WHERE extname='timescaledb';" \
             -c "SHOW server_version;"
+
+  webhook-alerting:
+    name: Webhook alerting integration
+    runs-on: ubuntu-latest
+    # All tests run in-process using httptest.Server — no external services,
+    # no Docker containers, no paid infrastructure, no production secrets.
+    # Scenarios: A firing, B deduplication, C resolution, D escalation,
+    # E severity filtering, HTTP failure modes, queue saturation, graceful
+    # shutdown, restart semantics, Prometheus self-metrics, credential
+    # redaction, Helm Secret wiring.
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.16.3
+
+      - name: Run alerting integration tests
+        run: |
+          go test \
+            -tags integration \
+            -race \
+            -count=1 \
+            -timeout 180s \
+            -v \
+            ./internal/alerting/...
+
+      - name: Verify Helm alerting Secret wiring (URL not in ConfigMap)
+        run: |
+          CONFIGMAP=$(helm template ifa deploy/helm/ifa \
+            --set alerting.existingSecret=ifa-alerting \
+            --set config.alerting.enabled=true \
+            | awk '/kind: ConfigMap/{found=1} found{print; if(/^---/)exit}')
+
+          if echo "${CONFIGMAP}" | grep -qE 'webhook_url:\s+"?(https?://)'; then
+            echo "FAIL: ConfigMap contains a populated webhook_url"
+            exit 1
+          fi
+          echo "✓ ConfigMap has no populated webhook_url"
+
+          DEPLOY=$(helm template ifa deploy/helm/ifa \
+            --set alerting.existingSecret=ifa-alerting \
+            --set config.alerting.enabled=true \
+            | awk '/kind: Deployment/{found=1} found{print; if(/^---/)exit}')
+
+          if ! echo "${DEPLOY}" | grep -q "secretKeyRef"; then
+            echo "FAIL: Deployment does not use secretKeyRef for IFA_ALERTING_WEBHOOK_URL"
+            exit 1
+          fi
+          echo "✓ Deployment uses secretKeyRef for IFA_ALERTING_WEBHOOK_URL"

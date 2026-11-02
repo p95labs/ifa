@@ -27,7 +27,7 @@ the single most important fact on this page.
 | Self-metrics | Integration validated — `ifa_scrapes_total` asserted in the kind test |
 | Kubernetes discovery via informers | Integration validated — real API server in a kind cluster in CI, and against a K3s cluster with a real GPU-backed vLLM deployment |
 | Helm chart, RBAC, NetworkPolicy, security contexts | Integration validated for the default install path; NetworkPolicy itself is rendered and schema-checked, never enforced in CI |
-| Webhook alerting | Implemented |
+| Webhook alerting | Integration validated — firing, deduplication, resolution, escalation, severity filtering, retry policy, queue saturation, shutdown drain, restart semantics, Prometheus self-metrics, and Helm Secret wiring all verified in CI |
 | TimescaleDB history | Integration validated — real TimescaleDB 2.14.2-pg16, migration verified, all 28 columns persisted, NULL/zero semantics confirmed, outage and recovery tested, CI job runs on every push |
 | Counter-rate and queue-growth rules | Integration validated — exercised through actual collector scrapes in the dynamic kind integration test; see below |
 | Demo and its end-to-end test | Locally validated |
@@ -241,6 +241,89 @@ Additional findings confirmed live: `IFA-EFF-003` (GPU memory 92–94%, DCGM),
 `IFA-LAT-001` (TTFT p95=888 ms, 89% queue share).
 
 Raw API responses in `scripts/gpu-validation/evidence/k8s/`.
+
+### Done: Webhook alerting end-to-end integration validation
+
+The webhook alerting sender has been validated through the complete control-plane
+pipeline, not only through isolated unit tests. All scenarios are exercised by
+`go test -tags integration ./internal/alerting/...`, which runs in CI on every
+push in the `webhook-alerting` job.
+
+**Scenario coverage:**
+
+- **A — Firing:** a real vLLM-format Prometheus metric (KV cache > 90%) is
+  served to the collector; the rule engine produces `IFA-KV-002` via the
+  `OnCycle` callback; the webhook receiver gets a `firing` payload with the
+  correct `schema_version`, `id`, `code`, `severity`, `cluster`, `namespace`,
+  `workload`, `runtime`, `title`, `explanation`, `suggested_action`, `evidence`,
+  `observed_at`, and `sent_at` fields. The API is never called; delivery is
+  automatic.
+- **B — Deduplication:** the condition persists across multiple collection
+  cycles; exactly one `firing` event arrives; `ifa_alerts_suppressed_total`
+  increments on every subsequent cycle.
+- **C — Resolution:** clearing the metric fixture causes a `resolved` event
+  with the same `id` as the original `firing` and a populated
+  `previous_severity`. The event is not repeated indefinitely.
+- **D — Escalation:** same-ID severity escalation (`warning` → `critical`)
+  delivers an `escalated` event with `previous_severity` set. Validated at
+  the Sender integration layer; no built-in rule changes a finding's severity
+  while preserving its ID.
+- **E — Severity filtering:** `min_severity=critical` blocks warning findings;
+  no false resolution event is generated for a filtered finding.
+
+**HTTP failure modes verified:**
+
+- 400, 401, 403, 404 — permanent failure, not retried (1 attempt)
+- 429, 500, 503 — retried once (2 attempts total)
+- Retry succeeds on second attempt — not counted as failure
+- Timeout exceeded — counted as failure, no hang
+- Connection refused — counted as failure, no panic
+- HTTP redirect — not followed (token isolation)
+- Permanently failed delivery — alert remains tracked as open; resolution
+  attempted on next evaluation cycle
+
+**Queue, shutdown, and restart:**
+
+- Queue saturation: `Notify` returns immediately on a full queue; dropped
+  events counted in `ifa_alerts_dropped_total`; collector unaffected
+- Recovery after overflow: new events delivered once endpoint recovers
+- Graceful shutdown: `Close` drains all queued alerts; all 20 queued alerts
+  delivered before return
+- Slow-receiver shutdown: `Close` returns within a bounded time even with 100 ms
+  per-delivery delay
+- Restart re-fires: in-memory state is lost; open conditions fire again on
+  the first evaluation; this is the documented at-most-once-per-process
+  semantics
+
+**Prometheus self-metrics:**
+
+All five alert metrics verified against actual delivery outcomes:
+`ifa_alerts_sent_total`, `ifa_alert_failures_total`,
+`ifa_alerts_dropped_total`, `ifa_alerts_suppressed_total`, `ifa_alerts_open`.
+Disabled alerting produces no alert metrics.
+
+**Helm Secret wiring confirmed:**
+
+`alerting.existingSecret` causes `IFA_ALERTING_WEBHOOK_URL` to be injected
+via `secretKeyRef`; the rendered ConfigMap contains only `webhook_url: ""`
+with no populated URL.
+
+**Credential redaction confirmed:**
+
+A real transport failure from `net/http` (which embeds the full URL) is
+intercepted and the token is replaced with `(redacted)` before the error
+reaches any log line.
+
+**CI job:** `webhook-alerting` added to `.github/workflows/ci.yml` — runs the
+full `-tags integration -race` suite plus the Helm Secret wiring check. No
+Docker, no external services, no paid infrastructure.
+
+**What this does not establish.** No live Slack, Teams, or PagerDuty endpoint
+was tested; IFA's JSON contract is validated structurally but native
+platform-specific field mappings (e.g. Slack `attachments`, PagerDuty event
+API v2) are not claimed. Escalation is validated at the Sender layer because
+no built-in rule changes a finding's severity while keeping its ID. The
+queue is in-memory and not replayed after a crash.
 
 ### Done: TimescaleDB real-database integration validation
 

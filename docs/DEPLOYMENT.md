@@ -296,6 +296,151 @@ migration, runs `go test -tags integration -race ./internal/storage/timescale/..
 verifies the Helm Secret wiring, and cleans up. It exits 0 only when all tests
 pass.
 
+## Optional webhook alerting
+
+IFA can POST a JSON alert payload to an HTTP endpoint whenever a finding
+transitions: fires, escalates, or resolves. Alerting is **off by default**.
+The REST API reports every finding whether or not alerting is configured.
+
+### What it does and does not do
+
+- Delivers one webhook POST per *transition*, not one per evaluation cycle.
+  A finding that holds for an hour produces one `firing` event and one
+  `resolved` event — not one event every 15 seconds.
+- Deduplicates in-memory. The state is lost on restart: an open finding will
+  re-fire on the next cycle after IFA restarts. This is at-most-once-per-process
+  semantics, not global exactly-once.
+- Retries transient failures (5xx, 429) once; non-retryable failures (4xx) are
+  not retried. A permanently failed delivery is not replayed.
+- Uses a bounded non-blocking queue (default 256). If the endpoint is slower
+  than findings are produced, deliveries are dropped and counted in
+  `ifa_alerts_dropped_total`. The collector and API are unaffected.
+- Does **not** guarantee zero data loss during outages. See
+  [ADR 0006](adr/0006-alert-deduplication.md) for the full design rationale.
+
+### Step 1 — Create the Kubernetes Secret
+
+The webhook URL is the credential for Slack, Teams, and PagerDuty (the token
+is embedded in the path). It must come from a Secret, not a ConfigMap:
+
+```bash
+kubectl create secret generic ifa-alerting \
+  --namespace ifa \
+  --from-literal=webhook_url='https://hooks.example.com/services/T0000/...'
+```
+
+### Step 2 — Enable in Helm values
+
+```yaml
+alerting:
+  existingSecret: ifa-alerting   # name of the Secret created above
+  secretKey: webhook_url         # key within the Secret
+
+config:
+  alerting:
+    enabled: true
+    min_severity: warning        # info, warning, or critical
+    timeout: 5s
+    queue_size: 256
+```
+
+IFA reads the URL from `IFA_ALERTING_WEBHOOK_URL` (injected by `secretKeyRef`).
+The ConfigMap contains only `webhook_url: ""` — the credential is never rendered
+into it.
+
+### Payload schema
+
+Every POST has `Content-Type: application/json`. The top-level fields are:
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `schema_version` | `int` | Currently `1` |
+| `event` | `string` | `"firing"`, `"escalated"`, or `"resolved"` |
+| `id` | `string` | Stable for the life of one condition; use this for correlation |
+| `code` | `string` | Rule code, e.g. `IFA-KV-002` |
+| `severity` | `string` | `"info"`, `"warning"`, or `"critical"` |
+| `previous_severity` | `string` | Set on `escalated` and `resolved` events |
+| `cluster` | `string` | From `config.cluster_name` |
+| `namespace` | `string` | Kubernetes namespace of the workload |
+| `workload` | `string` | Workload name |
+| `runtime` | `string` | e.g. `"vllm"` |
+| `title` | `string` | One-line description |
+| `explanation` | `string` | Empty on `resolved` |
+| `suggested_action` | `string` | Empty on `resolved` |
+| `evidence` | `array` | Metric, observed value, threshold, unit |
+| `observed_at` | `time.Time` | Time of the telemetry that triggered the rule; zero on `resolved` |
+| `sent_at` | `time.Time` | Time the payload was built |
+| `window_seconds` | `int` | Sustain window the finding was evaluated over |
+
+### Severity filtering
+
+Set `config.alerting.min_severity` to control which findings trigger a
+webhook. A finding below the threshold is never sent and never tracked —
+so it cannot generate a spurious resolution event later.
+
+| `min_severity` | Sent |
+| --- | --- |
+| `info` | All findings |
+| `warning` (default) | Warning and critical only |
+| `critical` | Critical only |
+
+### Prometheus self-metrics
+
+| Metric | Type | Meaning |
+| --- | --- | --- |
+| `ifa_alerts_sent_total` | counter | Successful webhook deliveries (transitions, not cycles) |
+| `ifa_alert_failures_total` | counter | Permanently failed deliveries after retries |
+| `ifa_alerts_dropped_total` | counter | Events dropped because the queue was full |
+| `ifa_alerts_suppressed_total` | counter | Findings not sent because they were already open and unchanged — expected to be large and growing |
+| `ifa_alerts_open` | gauge | Findings currently tracked as delivered and not yet resolved |
+
+Alert on any increase in `ifa_alert_failures_total`. Alert on
+`ifa_alerts_dropped_total` increasing if you need reliable delivery.
+
+### Retry policy
+
+| Response | Behaviour |
+| --- | --- |
+| 2xx | Success |
+| 400, 401, 403, 404 | Permanent failure — not retried |
+| 429, 5xx | Retried once after a short backoff |
+| Transport error (refused, timeout) | Retried once |
+| Redirect | Not followed — the URL is configuration, not a user-directed flow |
+
+The maximum total delivery attempts is **2** (one immediate, one after
+`alerting.backoff`). A delivery that exhausts both attempts is counted in
+`ifa_alert_failures_total`; the alert remains tracked as open so the next
+evaluation that sees the finding absent can still attempt a resolution.
+
+### Behaviour during outages and restarts
+
+**Endpoint outage:** The collector continues scraping and the API continues
+returning recommendations. Failed inserts are counted. The queue fills and
+drops events once it is full. When the endpoint recovers, subsequent new
+transitions are delivered.
+
+**IFA restart:** All in-memory alert state is lost. Every finding that was
+open will re-fire as a new `firing` event on the first evaluation after restart.
+This is by design: a restart is a natural boundary, and suppressing re-fires
+across a restart would hide conditions that started while IFA was down.
+
+### Reproducing the integration tests locally
+
+```bash
+# Requires Go and helm on PATH. No Docker required.
+bash scripts/alerting-integration.sh
+```
+
+The script runs `go test -tags integration -race ./internal/alerting/...` and
+then asserts the Helm Secret wiring. It exits 0 only when all checks pass.
+
+To run a single scenario:
+
+```bash
+go test -tags integration -v -run TestIntegration_Alerting_FullPipeline \
+  ./internal/alerting/...
+```
+
 ## Verifying an install
 
 ```bash
