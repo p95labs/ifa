@@ -78,3 +78,31 @@ two paths disagree is bounded by one collection interval.
   preferable to persisting state — a restart is a natural boundary, and
   suppressing alerts across a restart would hide conditions that started while
   IFA was down.
+
+## Validation
+
+All of the consequences above have been verified end to end by
+`go test -tags integration -race ./internal/alerting/...`, which runs in CI
+on every push in the `webhook-alerting` job. The test suite uses a full
+in-process pipeline (collector → store → recommender → OnCycle → sender →
+httptest.Server receiver) so alerts fire automatically without any direct
+call to `Sender.Notify` from test code.
+
+Verified specifically:
+
+- **O(1) alerts for a persistent condition** — `TestIntegration_Alerting_Deduplication`
+  runs many cycles and asserts exactly one firing event arrives.
+- **Resolved alerts delivered** — `TestIntegration_Alerting_FiringAndResolution`
+  clears the condition and waits for the `resolved` event.
+- **Queue bounded at capacity** — `TestIntegration_Alerting_QueueSaturation`
+  confirms `Notify` returns immediately and `ifa_alerts_dropped_total`
+  increments.
+- **Re-fire after restart** — `TestIntegration_Alerting_RestartRefiresOpenAlerts`
+  recreates the sender and confirms the same finding fires again.
+- **Escalation** — `TestIntegration_Alerting_Escalation` calls `Notify` with
+  the same ID at warning then critical severity and confirms an `escalated`
+  event with `previous_severity` set. Escalation is tested at the Sender
+  integration layer because no built-in rule changes a finding's severity while
+  preserving its ID.
+- **Retry policy** — `TestIntegration_Alerting_HTTPFailureModes` confirms 4xx
+  is not retried and 429/5xx gets one retry.
