@@ -87,6 +87,16 @@ database:
   # Snapshots buffered for writing before new ones are dropped and counted.
   queue_size: 1024
 
+api_auth:
+  # Optional Bearer-token authentication for the data endpoints.
+  # /api/v1/healthz, /api/v1/readyz and /metrics remain unauthenticated so
+  # Kubernetes health probes and Prometheus scrapers work without credentials.
+  #
+  # Leave token empty here and supply it via IFA_API_TOKEN (a Kubernetes Secret
+  # in production). A token in a ConfigMap is world-readable inside the cluster.
+  enabled: false
+  token: ""
+
 alerting:
   # Optional webhook delivery. The API serves every finding whether or not this
   # is on; enabling it only adds a push.

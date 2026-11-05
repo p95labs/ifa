@@ -415,3 +415,66 @@ func TestDSNIsRedactedInLogOutput(t *testing.T) {
 		t.Errorf("the startup log line leaks the password: %s", cfg.String())
 	}
 }
+
+// ── API authentication ────────────────────────────────────────────────────
+
+func TestAPIAuthDefaultsAreInertAndUsable(t *testing.T) {
+	cfg := Default()
+	if cfg.APIAuth.Enabled {
+		t.Error("api_auth must be off by default to preserve backward compatibility")
+	}
+	if cfg.APIAuth.Token != "" {
+		t.Error("api_auth.token must be empty in the built-in defaults")
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("default config with api_auth disabled does not validate: %v", err)
+	}
+}
+
+func TestAPIAuthEnabledWithTokenIsValid(t *testing.T) {
+	cfg := Default()
+	cfg.APIAuth.Enabled = true
+	cfg.APIAuth.Token = "a-sufficiently-long-test-token"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("enabled api_auth with a token does not validate: %v", err)
+	}
+}
+
+func TestAPIAuthEnabledWithoutTokenFails(t *testing.T) {
+	cfg := Default()
+	cfg.APIAuth.Enabled = true
+	cfg.APIAuth.Token = ""
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("api_auth.enabled=true with no token should not validate")
+	}
+	if !strings.Contains(err.Error(), EnvAPIToken) {
+		t.Errorf("error should mention %s env var, got: %v", EnvAPIToken, err)
+	}
+}
+
+func TestAPITokenComesFromEnvironment(t *testing.T) {
+	const tok = "env-supplied-test-token-xyz"
+	t.Setenv(EnvAPIToken, tok)
+	cfg, err := Load(writeConfig(t, "api_auth:\n  enabled: true\n"), true)
+	if err != nil {
+		t.Fatalf("Load with IFA_API_TOKEN set: %v", err)
+	}
+	if cfg.APIAuth.Token != tok {
+		t.Errorf("Token = %q, want it taken from %s", cfg.APIAuth.Token, EnvAPIToken)
+	}
+}
+
+func TestAPITokenNotLeakedInLogOutput(t *testing.T) {
+	const tok = "super-secret-not-a-real-token-789"
+	cfg := Default()
+	cfg.APIAuth.Enabled = true
+	cfg.APIAuth.Token = tok
+	out := cfg.String()
+	if strings.Contains(out, tok) {
+		t.Fatalf("config.String() leaked the API token: %s", out)
+	}
+	if !strings.Contains(out, "api_auth=true") {
+		t.Errorf("api_auth enabled state missing from startup log: %s", out)
+	}
+}
