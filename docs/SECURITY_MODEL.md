@@ -175,11 +175,15 @@ meaningful CPU. Restrict who can reach the port or put a rate-limiting proxy in
 front.
 
 **Supply-chain attestation.** The release workflow signs container images by
-digest using Sigstore Cosign keyless OIDC signing and attests a Syft-generated
-SPDX JSON SBOM. This applies to images published from a release tag. The
-`v0.2.0-alpha.1` image predates this change and carries no signature or
-attestation.
+immutable digest using Sigstore Cosign keyless OIDC signing and attests a
+Syft-generated SPDX JSON SBOM. The signing identity is
+`https://github.com/p95labs/ifa/.github/workflows/release.yml` under
+`https://token.actions.githubusercontent.com`. No private key is stored.
 
+This applies to images published from a release tag (`v0.3.0` onwards).
+The `v0.2.0-alpha.1` image predates this change and carries no signature.
+
+Verification: see `scripts/verify-release.sh` and `docs/DEPLOYMENT.md`.
 
 
 ## Reporting a vulnerability
