@@ -135,8 +135,16 @@ its evidence is acting on a guess. This is a large part of why IFA is read-only
 ([ADR 0001](adr/0001-read-only.md)) and why every finding carries the numbers
 behind it.
 
-**No supply-chain attestation yet.** Released images are not signed and no SBOM
-is published. Both are on the roadmap; neither exists today.
+**Supply-chain attestation.** The release workflow signs container images by
+immutable digest using Sigstore Cosign keyless OIDC signing and attests a
+Syft-generated SPDX JSON SBOM. The signing identity is
+`https://github.com/p95labs/ifa/.github/workflows/release.yml` under
+`https://token.actions.githubusercontent.com`. No private key is stored.
+
+This applies to images published from a release tag (`v0.3.0` onwards).
+The `v0.2.0-alpha.1` image predates this change and carries no signature.
+
+Verification: see `scripts/verify-release.sh` and `docs/DEPLOYMENT.md`.
 
 **No audit log.** IFA does not record who queried it.
 

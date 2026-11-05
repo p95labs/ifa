@@ -441,6 +441,56 @@ go test -tags integration -v -run TestIntegration_Alerting_FullPipeline \
   ./internal/alerting/...
 ```
 
+## API authentication
+
+IFA's data endpoints can require a Bearer token. Health probes and `/metrics`
+are always unauthenticated.
+
+**Create the Secret:**
+
+```bash
+kubectl create secret generic ifa-api-auth \
+  --namespace inference \
+  --from-literal=token="$(openssl rand -hex 32)"
+```
+
+**Reference it in `values.yaml`:**
+
+```yaml
+config:
+  api_auth:
+    enabled: true
+    token: ""          # never put the token here
+
+apiAuth:
+  existingSecret: ifa-api-auth
+  secretKey: token
+```
+
+The token is injected into the Pod as `IFA_API_TOKEN` via `secretKeyRef`. It
+does not appear in the ConfigMap.
+
+**CLI access:**
+
+```bash
+export IFA_API_TOKEN="$(kubectl get secret ifa-api-auth \
+  -n inference -o jsonpath='{.data.token}' | base64 -d)"
+ifa recommendations
+```
+
+**Secret rotation:**
+
+```bash
+kubectl create secret generic ifa-api-auth \
+  --namespace inference \
+  --from-literal=token="$(openssl rand -hex 32)" \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl rollout restart deployment/ifa -n inference
+```
+
+The Deployment automatically reloads when the Pod restarts. The old token stops
+working as soon as the new Pod is ready.
+
 ## Verifying an install
 
 ```bash
@@ -448,7 +498,9 @@ kubectl -n inference get pods -l app.kubernetes.io/name=ifa
 kubectl -n inference port-forward svc/ifa 8080:8080
 
 curl -s localhost:8080/api/v1/healthz | jq .config
-curl -s localhost:8080/api/v1/telemetry | jq '.count'
+# with auth enabled:
+curl -s -H "Authorization: Bearer ${IFA_API_TOKEN}" \
+  localhost:8080/api/v1/telemetry | jq '.count'
 curl -s localhost:8080/metrics | grep ifa_scrape_errors_total
 ```
 
@@ -457,3 +509,57 @@ fastest way to confirm the ConfigMap you edited is the one running.
 
 If `count` is 0 after a scrape interval, [OPERATIONS.md](OPERATIONS.md) has the
 diagnosis path.
+
+## Verifying a released image
+
+Images published from `v0.3.0` onwards are signed by digest using Sigstore
+Cosign keyless OIDC. A Syft-generated SPDX JSON SBOM is attested to each image.
+Images before `v0.3.0` carry no signature.
+
+**Prerequisites:** `cosign` — see https://docs.sigstore.dev/cosign/system_config/installation/
+
+**Verify signature:**
+
+```bash
+cosign verify \
+  --certificate-identity-regexp \
+    "https://github.com/p95labs/ifa/.github/workflows/release.yml" \
+  --certificate-oidc-issuer \
+    "https://token.actions.githubusercontent.com" \
+  ghcr.io/p95labs/ifa@<digest>
+```
+
+**Retrieve and verify SBOM:**
+
+```bash
+cosign verify-attestation \
+  --type spdxjson \
+  --certificate-identity-regexp \
+    "https://github.com/p95labs/ifa/.github/workflows/release.yml" \
+  --certificate-oidc-issuer \
+    "https://token.actions.githubusercontent.com" \
+  ghcr.io/p95labs/ifa@<digest> \
+| jq -r '.payload' | base64 -d | jq -r '.predicate' > sbom.spdx.json
+
+# Count packages:
+jq '.packages | length' sbom.spdx.json
+```
+
+A convenience wrapper for both checks:
+
+```bash
+bash scripts/verify-release.sh ghcr.io/p95labs/ifa@<digest>
+```
+
+**Get the digest for a released tag:**
+
+```bash
+docker buildx imagetools inspect ghcr.io/p95labs/ifa:0.3.0 \
+  --format '{{ .Manifest.Digest }}'
+```
+
+**What is and is not validated:**
+
+The signing workflow is implemented and CI-verified as of PR #56. Actual
+signatures and SBOM attestations exist only for images published under a release
+tag. The `v0.2.0-alpha.1` image predates this change and carries neither.

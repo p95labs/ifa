@@ -4,6 +4,8 @@ on:
   push:
     tags: ["v*"]
 
+# Default to least-privilege. The sign job overrides id-token: write for
+# itself only — no other job can request an OIDC token.
 permissions:
   contents: write
   packages: write
@@ -51,6 +53,11 @@ jobs:
   image:
     name: Container image
     runs-on: ubuntu-latest
+    # Expose the immutable digest so the sign job can reference it without
+    # relying on mutable tags.
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      image: ghcr.io/${{ github.repository }}
     steps:
       - uses: actions/checkout@v7
 
@@ -72,6 +79,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
 
       - uses: docker/build-push-action@v7
+        id: build
         with:
           context: .
           file: deploy/docker/Dockerfile
@@ -80,3 +88,84 @@ jobs:
           build-args: VERSION=${{ github.ref_name }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  sign:
+    name: Sign image and generate SBOM
+    needs: image
+    runs-on: ubuntu-latest
+    # id-token: write is needed only for Cosign keyless OIDC signing.
+    # It is scoped to this job alone; no other job can request an OIDC token.
+    # packages: write is needed to push the signature and SBOM attestation.
+    permissions:
+      id-token: write
+      packages: write
+    env:
+      IMAGE_REF: ${{ needs.image.outputs.image }}@${{ needs.image.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Install Cosign. Keyless signing uses a short-lived GitHub OIDC
+      # certificate — no private key is stored anywhere.
+      - uses: sigstore/cosign-installer@v3.8.2
+
+      # Sign the immutable digest. The signature is pushed to the OCI registry
+      # alongside the image and references the digest, not a mutable tag.
+      # Verification: cosign verify --certificate-identity-regexp '...' \
+      #   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+      #   ghcr.io/p95labs/ifa@<digest>
+      - name: Sign image digest (keyless)
+        run: |
+          cosign sign --yes "${IMAGE_REF}"
+          echo "Signed: ${IMAGE_REF}"
+
+      # Generate a Syft SBOM in SPDX JSON format for the published image.
+      # The SBOM is produced from the actual registry image so it reflects
+      # every layer that was pushed, not only the build context.
+      - uses: anchore/sbom-action@v0.18.0
+        id: sbom
+        with:
+          image: ${{ env.IMAGE_REF }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+
+      # Attest the SBOM to the image so it can be retrieved with:
+      #   cosign verify-attestation --type spdxjson \
+      #     --certificate-identity-regexp '...' \
+      #     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+      #     ghcr.io/p95labs/ifa@<digest>
+      - name: Attest SBOM
+        run: |
+          cosign attest --yes \
+            --predicate sbom.spdx.json \
+            --type spdxjson \
+            "${IMAGE_REF}"
+          echo "SBOM attested: ${IMAGE_REF}"
+
+      # Upload the SBOM as a release asset so it is downloadable without
+      # Cosign tooling.
+      - name: Upload SBOM to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" sbom.spdx.json \
+            --clobber \
+            --repo "${{ github.repository }}"
+
+      # Print the identity the signature was issued under so the release log
+      # records which workflow run produced it.
+      - name: Log signing identity
+        run: |
+          cosign verify \
+            --certificate-identity-regexp \
+              "https://github.com/${{ github.repository }}/.github/workflows/release.yml" \
+            --certificate-oidc-issuer \
+              "https://token.actions.githubusercontent.com" \
+            "${IMAGE_REF}" \
+          | jq -r '.[0].optional | {Issuer, Subject, "GitHub workflow": .Workflow, "Run ID": .RunID}'
