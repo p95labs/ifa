@@ -70,6 +70,14 @@ spec:
                   name: {{ .Values.alerting.existingSecret }}
                   key: {{ .Values.alerting.secretKey }}
             {{- end }}
+            {{- if .Values.apiAuth.existingSecret }}
+            # Kept out of the ConfigMap: the API bearer token is a credential.
+            - name: IFA_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.apiAuth.existingSecret }}
+                  key: {{ .Values.apiAuth.secretKey }}
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

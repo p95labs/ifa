@@ -203,6 +203,8 @@ func run() error {
 		Engine:    engine,
 		Metrics:   reg,
 		Logger:    log,
+		// Token comes from IFA_API_TOKEN (a Secret); never from the ConfigMap.
+		Token: cfg.APIAuth.Token,
 		Info: api.HealthInfo{
 			Version:        version,
 			Commit:         commit(),
