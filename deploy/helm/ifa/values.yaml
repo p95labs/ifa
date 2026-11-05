@@ -141,6 +141,15 @@ alerting:
   existingSecret: ""
   secretKey: webhook_url
 
+# apiAuth wires the API bearer token from a Kubernetes Secret rather than from
+# a ConfigMap. Set config.api_auth.enabled: true as well.
+# The token protects /api/v1/telemetry, /api/v1/recommendations,
+# /api/v1/workloads and /api/v1/rules (and their legacy equivalents).
+# Health probes and /metrics remain unauthenticated.
+apiAuth:
+  existingSecret: ""
+  secretKey: token
+
 # Extra environment variables for the container.
 extraEnv: []
 
@@ -196,6 +205,13 @@ config:
     enabled: false
     dsn: ""
     queue_size: 1024
+
+  # Optional Bearer-token authentication for the data endpoints.
+  # Health probes (/api/v1/healthz, /api/v1/readyz) and /metrics remain
+  # unauthenticated. Leave token empty here; set apiAuth.existingSecret above.
+  api_auth:
+    enabled: false
+    token: ""
 
   # Optional webhook delivery for findings. Off by default; the API serves
   # every finding either way.

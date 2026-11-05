@@ -29,17 +29,64 @@ Only the values that genuinely differ per deployment:
 |---|---|
 | `IFA_DATABASE_DSN` | `database.dsn` |
 | `IFA_ALERTING_WEBHOOK_URL` | `alerting.webhook_url` |
+| `IFA_API_TOKEN` | `api_auth.token` |
 | `IFA_LOG_LEVEL` | `logging.level` |
 | `IFA_LOG_FORMAT` | `logging.format` |
 | `IFA_ADDRESS` | `server.address` |
 | `IFA_CLUSTER_NAME` | `cluster_name` |
 
-The DSN and the webhook URL are here because both *are* credentials — the DSN
-carries a password, and Slack, Teams and PagerDuty all embed the token in the
-webhook path — so both belong in a Secret rather than in the ConfigMap the rest
-of the configuration lives in. The chart wires them from
-`database.existingSecret` and `alerting.existingSecret`. Everything else stays in
-the file, where it can be reviewed in a pull request.
+`IFA_DATABASE_DSN`, `IFA_ALERTING_WEBHOOK_URL`, and `IFA_API_TOKEN` are
+credentials. All three belong in a Kubernetes Secret, not in the ConfigMap —
+values in a ConfigMap are world-readable inside the cluster. The chart wires
+them from `database.existingSecret`, `alerting.existingSecret`, and
+`apiAuth.existingSecret` respectively. Everything else stays in the file, where
+it can be reviewed in a pull request.
+
+## API authentication
+
+IFA's data endpoints (`/api/v1/telemetry`, `/api/v1/recommendations`,
+`/api/v1/workloads`, `/api/v1/rules`) can require a Bearer token:
+
+```yaml
+api_auth:
+  enabled: true
+  token: ""   # leave empty here; supply via IFA_API_TOKEN from a Secret
+```
+
+Health probes (`/api/v1/healthz`, `/api/v1/readyz`) and `/metrics` are always
+unauthenticated — Kubernetes sends probes without credentials.
+
+In Helm:
+
+```yaml
+# values.yaml
+config:
+  api_auth:
+    enabled: true
+    token: ""           # must stay empty
+
+apiAuth:
+  existingSecret: ifa-api-auth
+  secretKey: token
+```
+
+Create the Secret before installing:
+
+```bash
+kubectl create secret generic ifa-api-auth \
+    --namespace ifa \
+    --from-literal=token="$(openssl rand -hex 32)"
+```
+
+The `ifa` CLI reads `IFA_API_TOKEN` automatically:
+
+```bash
+export IFA_API_TOKEN=<token>
+ifa recommendations
+```
+
+There is deliberately no `-token` flag: flags appear in process listings and
+shell history.
 
 ## Scrape targets
 

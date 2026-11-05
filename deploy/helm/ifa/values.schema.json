@@ -48,6 +48,14 @@
         "secretKey": { "type": "string", "minLength": 1 }
       }
     },
+    "apiAuth": {
+      "type": "object",
+      "description": "References a Kubernetes Secret containing the API bearer token.",
+      "properties": {
+        "existingSecret": { "type": "string" },
+        "secretKey": { "type": "string", "minLength": 1 }
+      }
+    },
     "config": {
       "type": "object",
       "properties": {
@@ -91,6 +99,14 @@
             },
             "timeout": { "type": "string" },
             "queue_size": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "api_auth": {
+          "type": "object",
+          "description": "Optional Bearer-token authentication. Leave token empty and use apiAuth.existingSecret.",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "token": { "type": "string" }
           }
         }
       }

@@ -88,6 +88,14 @@ Common flags:
   -namespace, -workload, -runtime, -severity, -code
                     Server-side filters (where the endpoint supports them)
 
+Authentication:
+  When the control plane is configured with api_auth.enabled: true, set
+  IFA_API_TOKEN to the bearer token. It is read from the environment rather
+  than a flag to keep it out of process listings and shell history.
+
+    export IFA_API_TOKEN=<token>
+    ifa recommendations
+
 Examples:
   ifa recommendations -severity critical
   ifa telemetry -namespace inference
@@ -476,6 +484,12 @@ func get(ctx context.Context, target string, timeout time.Duration) ([]byte, err
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
 	if err != nil {
 		return nil, fmt.Errorf("building request for %s: %w", target, err)
+	}
+	// Bearer token from the environment, never from a flag: flags appear in
+	// process listings and shell history, both of which are unsafe token
+	// storage. The variable name matches the server-side IFA_API_TOKEN.
+	if tok := os.Getenv("IFA_API_TOKEN"); tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 	client := &http.Client{Timeout: timeout}
 	resp, err := client.Do(req)

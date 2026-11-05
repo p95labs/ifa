@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -350,5 +351,213 @@ func TestNewRejectsMissingDependencies(t *testing.T) {
 	}
 	if _, err := New(Options{Logger: slog.Default(), Store: stubStore{}}, http.NewServeMux()); err == nil {
 		t.Error("a server without a rule engine was accepted")
+	}
+}
+
+// ── Bearer-token authentication ──────────────────────────────────────────────
+
+func testServerWithToken(t *testing.T, token string) *http.ServeMux {
+	t.Helper()
+	mux := http.NewServeMux()
+	_, err := New(Options{
+		Store:   stubStore{snaps: []telemetry.Snapshot{snapshot("ns", "w", telemetry.RuntimeVLLM)}},
+		Engine:  recommender.NewEngine(recommender.DefaultThresholds()),
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Metrics: &stubMetrics{},
+		Token:   token,
+		Info:    HealthInfo{Version: "test"},
+	}, mux)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return mux
+}
+
+func doWithToken(t *testing.T, mux *http.ServeMux, path, token string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	mux.ServeHTTP(rec, req)
+	return rec
+}
+
+const testToken = "super-secret-test-token-abc123"
+
+// Auth disabled (Token == ""): all existing behavior is unchanged.
+func TestAuth_Disabled_AllDataEndpointsOpen(t *testing.T) {
+	mux := testServerWithToken(t, "")
+	for _, path := range []string{
+		"/api/v1/telemetry",
+		"/api/v1/recommendations",
+		"/api/v1/workloads",
+		"/api/v1/rules",
+		"/telemetry",
+		"/recommendations",
+		"/workloads",
+	} {
+		rec := do(t, mux, http.MethodGet, path)
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s with auth disabled = %d, want 200", path, rec.Code)
+		}
+	}
+}
+
+// Health probes must work without credentials regardless of auth setting.
+func TestAuth_HealthProbesAlwaysUnauthenticated(t *testing.T) {
+	mux := testServerWithToken(t, testToken)
+	for _, path := range []string{"/api/v1/healthz", "/api/v1/readyz", "/healthz"} {
+		rec := do(t, mux, http.MethodGet, path)
+		// readyz returns 503 until SetReady; that is fine — the point is 401
+		// is never returned.
+		if rec.Code == http.StatusUnauthorized {
+			t.Errorf("%s returned 401 — health probes must be unauthenticated", path)
+		}
+	}
+}
+
+// /metrics must be reachable by Prometheus without credentials.
+func TestAuth_MetricsAlwaysUnauthenticated(t *testing.T) {
+	mux := testServerWithToken(t, testToken)
+	rec := do(t, mux, http.MethodGet, "/metrics")
+	if rec.Code == http.StatusUnauthorized {
+		t.Error("/metrics returned 401 — monitoring scraping must be unauthenticated")
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("/metrics = %d, want 200", rec.Code)
+	}
+}
+
+// Missing Authorization header → 401.
+func TestAuth_MissingHeader_Returns401(t *testing.T) {
+	mux := testServerWithToken(t, testToken)
+	for _, path := range []string{
+		"/api/v1/telemetry", "/api/v1/recommendations",
+		"/api/v1/workloads", "/api/v1/rules",
+		"/telemetry", "/recommendations", "/workloads",
+	} {
+		rec := do(t, mux, http.MethodGet, path)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s without header = %d, want 401", path, rec.Code)
+		}
+	}
+}
+
+// Malformed header (wrong scheme) → 401.
+func TestAuth_MalformedHeader_Returns401(t *testing.T) {
+	mux := testServerWithToken(t, testToken)
+	for _, badHeader := range []string{
+		"Token " + testToken,
+		"Basic dXNlcjpwYXNz",
+		testToken, // no scheme at all
+		"Bearer",  // scheme only, no token
+		"",
+	} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/telemetry", nil)
+		if badHeader != "" {
+			req.Header.Set("Authorization", badHeader)
+		}
+		mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("Authorization %q = %d, want 401", badHeader, rec.Code)
+		}
+	}
+}
+
+// Incorrect token value → 401.
+func TestAuth_WrongToken_Returns401(t *testing.T) {
+	mux := testServerWithToken(t, testToken)
+	rec := doWithToken(t, mux, "/api/v1/telemetry", "wrong-token-value")
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("wrong token = %d, want 401", rec.Code)
+	}
+}
+
+// Correct token → 200 for all data endpoints.
+func TestAuth_CorrectToken_Returns200(t *testing.T) {
+	mux := testServerWithToken(t, testToken)
+	for _, path := range []string{
+		"/api/v1/telemetry",
+		"/api/v1/recommendations",
+		"/api/v1/workloads",
+		"/api/v1/rules",
+		"/telemetry",
+		"/recommendations",
+		"/workloads",
+	} {
+		rec := doWithToken(t, mux, path, testToken)
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s with correct token = %d, want 200", path, rec.Code)
+		}
+	}
+}
+
+// Token must not be leaked in 401 responses.
+func TestAuth_TokenNotLeakedInErrorResponse(t *testing.T) {
+	mux := testServerWithToken(t, testToken)
+	rec := do(t, mux, http.MethodGet, "/api/v1/telemetry")
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if strings.Contains(body, testToken) {
+		t.Error("the token appears in the 401 response body")
+	}
+}
+
+// Query-parameter token must be ignored (logs/history leak risk).
+func TestAuth_QueryParamToken_Rejected(t *testing.T) {
+	mux := testServerWithToken(t, testToken)
+	path := "/api/v1/telemetry?token=" + testToken
+	rec := do(t, mux, http.MethodGet, path)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("query-param token = %d, want 401 — query strings are unsafe token storage", rec.Code)
+	}
+}
+
+// 401 response must use the standard error envelope.
+func TestAuth_401UsesStandardErrorEnvelope(t *testing.T) {
+	mux := testServerWithToken(t, testToken)
+	rec := do(t, mux, http.MethodGet, "/api/v1/telemetry")
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+	var payload apiError
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("401 body is not the standard error envelope: %v", err)
+	}
+	if payload.Error.Code != "unauthorized" {
+		t.Errorf("error code = %q, want unauthorized", payload.Error.Code)
+	}
+}
+
+// Legacy endpoints must not bypass authentication.
+func TestAuth_LegacyPaths_RequireAuth(t *testing.T) {
+	mux := testServerWithToken(t, testToken)
+	for _, path := range []string{"/telemetry", "/recommendations", "/workloads"} {
+		rec := do(t, mux, http.MethodGet, path)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("legacy %s without auth = %d, want 401", path, rec.Code)
+		}
+		rec = doWithToken(t, mux, path, testToken)
+		if rec.Code != http.StatusOK {
+			t.Errorf("legacy %s with correct token = %d, want 200", path, rec.Code)
+		}
+	}
+}
+
+// Write methods on protected paths must still get 405, not 401 — the
+// method check runs inside requireAuth so it sees the same token gate.
+func TestAuth_WriteMethodsStillReturn405WhenAuthenticated(t *testing.T) {
+	mux := testServerWithToken(t, testToken)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/telemetry", nil)
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("POST with valid token = %d, want 405", rec.Code)
 	}
 }

@@ -58,6 +58,7 @@ type Config struct {
 	Kubernetes  KubernetesConfig  `yaml:"kubernetes"`
 	Database    DatabaseConfig    `yaml:"database"`
 	Alerting    AlertingConfig    `yaml:"alerting"`
+	APIAuth     APIAuthConfig     `yaml:"api_auth"`
 	Recommender RecommenderConfig `yaml:"recommender"`
 }
 
@@ -138,6 +139,21 @@ type DatabaseConfig struct {
 	// password never has to live in a ConfigMap.
 	DSN       string `yaml:"dsn"`
 	QueueSize int    `yaml:"queue_size"`
+}
+
+// APIAuthConfig configures optional Bearer-token authentication for the data
+// endpoints. Health probes (/api/v1/healthz, /api/v1/readyz) and
+// /metrics remain unauthenticated so Kubernetes and monitoring infrastructure
+// can reach them without credentials.
+//
+// Disabled by default for backward compatibility and local demos.
+type APIAuthConfig struct {
+	Enabled bool `yaml:"enabled"`
+	// Token is read from IFA_API_TOKEN when that variable is set. Never put
+	// a real token in api_auth.token in the ConfigMap — that value is
+	// world-readable inside the cluster. Leave this field empty and reference
+	// a Kubernetes Secret instead.
+	Token string `yaml:"token"`
 }
 
 // AlertingConfig configures the optional webhook sender.
@@ -229,6 +245,7 @@ func Default() *Config {
 			Timeout:     Duration(alerting.DefaultTimeout),
 			QueueSize:   alerting.DefaultQueueSize,
 		},
+		APIAuth: APIAuthConfig{Enabled: false},
 		Recommender: RecommenderConfig{Thresholds: ThresholdConfig{
 			SustainFor:           Duration(t.SustainFor),
 			StaleAfter:           Duration(t.StaleAfter),
@@ -284,10 +301,13 @@ func Load(path string, required bool) (*Config, error) {
 const (
 	EnvDatabaseDSN        = "IFA_DATABASE_DSN"
 	EnvAlertingWebhookURL = "IFA_ALERTING_WEBHOOK_URL"
-	EnvLogLevel           = "IFA_LOG_LEVEL"
-	EnvLogFormat          = "IFA_LOG_FORMAT"
-	EnvAddress            = "IFA_ADDRESS"
-	EnvClusterName        = "IFA_CLUSTER_NAME"
+	// EnvAPIToken holds the Bearer token for the data API. It must never
+	// appear in a ConfigMap; set it from a Kubernetes Secret via secretKeyRef.
+	EnvAPIToken    = "IFA_API_TOKEN"
+	EnvLogLevel    = "IFA_LOG_LEVEL"
+	EnvLogFormat   = "IFA_LOG_FORMAT"
+	EnvAddress     = "IFA_ADDRESS"
+	EnvClusterName = "IFA_CLUSTER_NAME"
 )
 
 func applyEnv(cfg *Config) {
@@ -301,6 +321,10 @@ func applyEnv(cfg *Config) {
 	// Secret in a Helm deployment.
 	if v := os.Getenv(EnvAlertingWebhookURL); v != "" {
 		cfg.Alerting.WebhookURL = v
+	}
+	// The API token is a credential; it must come from a Secret, not a ConfigMap.
+	if v := os.Getenv(EnvAPIToken); v != "" {
+		cfg.APIAuth.Token = v
 	}
 	if v := os.Getenv(EnvLogLevel); v != "" {
 		cfg.Logging.Level = v
@@ -395,6 +419,20 @@ func (c *Config) Validate() error {
 
 	if err := c.validateAlerting(); err != nil {
 		return err
+	}
+	if err := c.validateAPIAuth(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Config) validateAPIAuth() error {
+	if !c.APIAuth.Enabled {
+		return nil
+	}
+	if c.APIAuth.Token == "" {
+		return fmt.Errorf("config: api_auth.enabled is true but no token is set; "+
+			"put it in api_auth.token or in the %s environment variable", EnvAPIToken)
 	}
 	return nil
 }
@@ -524,6 +562,9 @@ func (c *Config) String() string {
 		b.WriteString(" webhook=" + alerting.RedactURL(c.Alerting.WebhookURL))
 		b.WriteString(" min_severity=" + strings.ToLower(c.Alerting.MinSeverity))
 	}
+	b.WriteString(" api_auth=" + strconv.FormatBool(c.APIAuth.Enabled))
+	// Never log the token, even partially. A startup log that ends up in a
+	// shared store is exactly where a credential leak typically originates.
 	return b.String()
 }
 

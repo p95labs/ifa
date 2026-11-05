@@ -481,3 +481,90 @@ jobs:
             exit 1
           fi
           echo "✓ Deployment uses secretKeyRef for IFA_ALERTING_WEBHOOK_URL"
+
+  api-auth-integration:
+    name: API auth integration
+    runs-on: ubuntu-latest
+    # Validates Bearer-token authentication end-to-end:
+    #   • Go unit tests (requireAuth middleware, config validation, CLI)
+    #   • Helm Secret wiring: token absent from ConfigMap, present in Deployment
+    #   • kind Kubernetes smoke test: 401 without token, 200 with correct token,
+    #     health probes unauthenticated, legacy endpoints protected
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Auth unit tests
+        run: go test -race -count=1 -v ./internal/api/... ./internal/config/... ./cmd/ifa/...
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build IFA image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          push: false
+          load: true
+          tags: ifa:integration-test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Install kind
+        run: |
+          sudo curl -sSLo /usr/local/bin/kind \
+            "https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64"
+          sudo chmod +x /usr/local/bin/kind
+          kind version
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: v3.16.3
+
+      - name: Helm Secret wiring (token absent from ConfigMap)
+        run: |
+          CONFIGMAP=$(helm template ifa deploy/helm/ifa \
+            --set apiAuth.existingSecret=ifa-api-auth \
+            --set "config.api_auth.enabled=true" \
+            | awk '/kind: ConfigMap/{found=1} found{print; if(/^---/)exit}')
+
+          # The ConfigMap must not contain a populated token value.
+          if echo "${CONFIGMAP}" | grep -qE 'token:\s+"[^"]'; then
+            echo "FAIL: ConfigMap contains a populated api_auth.token"
+            exit 1
+          fi
+          echo "✓ ConfigMap has no populated api_auth.token"
+
+          DEPLOY=$(helm template ifa deploy/helm/ifa \
+            --set apiAuth.existingSecret=ifa-api-auth \
+            --set "config.api_auth.enabled=true" \
+            | awk '/kind: Deployment/{found=1} found{print; if(/^---/)exit}')
+
+          if ! echo "${DEPLOY}" | grep -q "IFA_API_TOKEN"; then
+            echo "FAIL: Deployment does not inject IFA_API_TOKEN"
+            exit 1
+          fi
+          if ! echo "${DEPLOY}" | grep -q "secretKeyRef"; then
+            echo "FAIL: Deployment does not use secretKeyRef for IFA_API_TOKEN"
+            exit 1
+          fi
+          echo "✓ Deployment injects IFA_API_TOKEN via secretKeyRef"
+
+      - name: Run kind auth smoke test
+        run: bash scripts/kind-auth-integration.sh
+
+      - name: IFA pod logs on failure
+        if: failure()
+        run: |
+          kubectl logs --namespace ifa \
+            -l app.kubernetes.io/name=ifa --tail=100 2>/dev/null || true
+
+      - name: Cluster state on failure
+        if: failure()
+        run: |
+          kubectl get all --all-namespaces 2>/dev/null || true
+          kubectl describe pods --all-namespaces 2>/dev/null || true

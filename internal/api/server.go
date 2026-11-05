@@ -7,6 +7,7 @@
 package api
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -63,6 +64,11 @@ type Options struct {
 	// Info is reported by /api/v1/healthz so an operator can confirm which
 	// configuration a running instance actually loaded.
 	Info HealthInfo
+	// Token, when non-empty, enables Bearer-token authentication for all data
+	// endpoints. Health probes and /metrics remain unauthenticated.
+	// The value must come from a Kubernetes Secret (via IFA_API_TOKEN); it
+	// must never appear in a ConfigMap or in logs.
+	Token string
 }
 
 // HealthInfo describes the running configuration.
@@ -101,13 +107,17 @@ func New(opts Options, mux *http.ServeMux) (*Server, error) {
 
 	s := &Server{opts: opts, started: time.Now()}
 
+	// Health probes are deliberately unauthenticated: Kubernetes sends them
+	// without credentials and there is no safe way to inject a token into
+	// livenessProbe/readinessProbe. They expose only process-level status,
+	// not inference data.
 	routes := map[string]http.HandlerFunc{
 		"/api/v1/healthz":         s.handleHealthz,
 		"/api/v1/readyz":          s.handleReadyz,
-		"/api/v1/telemetry":       s.handleTelemetry,
-		"/api/v1/recommendations": s.handleRecommendations,
-		"/api/v1/workloads":       s.handleWorkloads,
-		"/api/v1/rules":           s.handleRules,
+		"/api/v1/telemetry":       requireAuth(opts.Token, s.handleTelemetry),
+		"/api/v1/recommendations": requireAuth(opts.Token, s.handleRecommendations),
+		"/api/v1/workloads":       requireAuth(opts.Token, s.handleWorkloads),
+		"/api/v1/rules":           requireAuth(opts.Token, s.handleRules),
 	}
 	for path, h := range routes {
 		mux.Handle(path, getOnly(h))
@@ -116,11 +126,13 @@ func New(opts Options, mux *http.ServeMux) (*Server, error) {
 	// Unversioned paths from before /api/v1 existed. They return the bare
 	// arrays the original API returned rather than the versioned envelope, so
 	// existing clients keep working unchanged. See docs/API.md.
+	// They are subject to the same authentication as their /api/v1 equivalents
+	// so there is no unauthenticated back door through the legacy surface.
 	legacy := map[string]http.HandlerFunc{
 		"/healthz":         s.handleHealthz,
-		"/telemetry":       s.handleLegacyTelemetry,
-		"/recommendations": s.handleLegacyRecommendations,
-		"/workloads":       s.handleLegacyWorkloads,
+		"/telemetry":       requireAuth(opts.Token, s.handleLegacyTelemetry),
+		"/recommendations": requireAuth(opts.Token, s.handleLegacyRecommendations),
+		"/workloads":       requireAuth(opts.Token, s.handleLegacyWorkloads),
 	}
 	for path, h := range legacy {
 		mux.Handle(path, getOnly(h))
@@ -390,6 +402,40 @@ func (f filter) matchesRecommendation(r telemetry.Recommendation) bool {
 		return false
 	}
 	return true
+}
+
+// requireAuth wraps h with Bearer-token authentication when token is non-empty.
+// When token is empty the handler is returned unchanged, preserving backward
+// compatibility for deployments that run without authentication.
+//
+// Only the Authorization request header is accepted. Tokens passed as query
+// parameters (?token=...) are ignored — query strings appear in access logs
+// and browser history, making them an unsafe transport for credentials.
+//
+// constant-time comparison prevents timing-based token enumeration.
+func requireAuth(token string, h http.HandlerFunc) http.HandlerFunc {
+	if token == "" {
+		return h
+	}
+	want := []byte(token)
+	const scheme = "Bearer "
+	return func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		// Check the scheme prefix without constant-time comparison: "Bearer "
+		// is public knowledge and its length does not reveal the token.
+		if len(auth) <= len(scheme) || auth[:len(scheme)] != scheme {
+			writeError(w, http.StatusUnauthorized, "unauthorized",
+				"valid Bearer token required")
+			return
+		}
+		got := []byte(auth[len(scheme):])
+		if subtle.ConstantTimeCompare(got, want) != 1 {
+			writeError(w, http.StatusUnauthorized, "unauthorized",
+				"valid Bearer token required")
+			return
+		}
+		h(w, r)
+	}
 }
 
 // getOnly rejects anything but GET and HEAD. The API is read-only by design;

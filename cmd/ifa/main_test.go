@@ -197,3 +197,63 @@ func TestUnknownCommandFails(t *testing.T) {
 		t.Error("usage was not printed for an unknown command")
 	}
 }
+
+// ── API authentication ──────────────────────────────────────────────────────
+
+// TestCLISendsTokenFromEnvironment verifies the CLI reads IFA_API_TOKEN and
+// adds an Authorization: Bearer header. The server checks for it.
+func TestCLISendsTokenFromEnvironment(t *testing.T) {
+	const tok = "cli-test-token-abc-def-ghi"
+
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"items":[],"count":0}`))
+	}))
+	defer srv.Close()
+
+	t.Setenv("IFA_API_TOKEN", tok)
+
+	var out strings.Builder
+	if err := run([]string{"telemetry", "-url", srv.URL}, &out); err != nil {
+		t.Fatalf("run with IFA_API_TOKEN set: %v", err)
+	}
+	if gotAuth != "Bearer "+tok {
+		t.Errorf("Authorization header = %q, want %q", gotAuth, "Bearer "+tok)
+	}
+}
+
+// TestCLIReceives401WhenTokenIsMissing verifies the CLI surfaces a 401 error.
+func TestCLIReceives401WhenTokenIsMissing(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":{"code":"unauthorized","message":"valid Bearer token required"}}`))
+	}))
+	defer srv.Close()
+
+	var out strings.Builder
+	err := run([]string{"telemetry", "-url", srv.URL}, &out)
+	if err == nil {
+		t.Fatal("a 401 response was treated as success")
+	}
+	if !strings.Contains(err.Error(), "401") {
+		t.Errorf("error does not mention the status: %v", err)
+	}
+}
+
+// TestCLITokenNotInUsageOrFlags verifies no -token flag exists (flags appear
+// in process listings and shell history).
+func TestCLITokenNotInUsageOrFlags(t *testing.T) {
+	var out strings.Builder
+	_ = run([]string{"help"}, &out)
+	output := out.String()
+	// IFA_API_TOKEN env var should be mentioned in usage.
+	if !strings.Contains(output, "IFA_API_TOKEN") {
+		t.Error("usage should mention IFA_API_TOKEN env var")
+	}
+	// But -token flag must not exist.
+	if strings.Contains(output, "-token") {
+		t.Error("a -token flag must not exist: use IFA_API_TOKEN env var instead")
+	}
+}

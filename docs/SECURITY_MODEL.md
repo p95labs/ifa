@@ -4,7 +4,7 @@
 
 A process that makes outbound HTTP GETs to endpoints an operator listed, watches
 three Kubernetes resource types read-only, holds the results in memory, and
-serves them over an unauthenticated HTTP API.
+serves them over an optionally authenticated HTTP API.
 
 ## Read-only by construction
 
@@ -89,13 +89,43 @@ what IFA parses.
   keys. Nothing is interpolated into a query — the database sink uses bound
   parameters exclusively — or written to disk.
 
+## API authentication
+
+Data endpoints (`/api/v1/telemetry`, `/api/v1/recommendations`,
+`/api/v1/workloads`, `/api/v1/rules`, and their legacy equivalents) can require
+a Bearer token. Set `api_auth.enabled: true` and supply the token via
+`IFA_API_TOKEN` (never in the ConfigMap).
+
+Health probes (`/api/v1/healthz`, `/api/v1/readyz`) and `/metrics` remain
+unauthenticated — Kubernetes sends probes without credentials and Prometheus
+scrapes without headers by default.
+
+The middleware uses `crypto/subtle.ConstantTimeCompare` to prevent timing-based
+token enumeration. Tokens passed as query parameters are silently ignored;
+only the `Authorization: Bearer` header is accepted, because query strings
+appear in access logs and browser history.
+
+A 401 response reveals only `{"error":{"code":"unauthorized","message":"valid
+Bearer token required"}}` — it does not distinguish a missing header from a
+wrong token, to avoid helping an attacker enumerate.
+
+The CLI reads `IFA_API_TOKEN` from the environment and adds the header
+automatically. There is deliberately no `-token` flag: flags appear in process
+listings and shell history.
+
 ## Secrets
 
-The database DSN is the only credential IFA holds. It is read from
-`IFA_DATABASE_DSN`, sourced from a Secret by the chart, and never from the
-ConfigMap the rest of the configuration lives in. It is redacted in the startup
-log line, which is otherwise a reliable way to leak a password into a shared log
-store.
+Three credentials IFA can hold, all sourced from environment variables:
+
+| Secret | Env var | Chart value |
+|--------|---------|-------------|
+| Database DSN | `IFA_DATABASE_DSN` | `database.existingSecret` |
+| Webhook URL | `IFA_ALERTING_WEBHOOK_URL` | `alerting.existingSecret` |
+| API bearer token | `IFA_API_TOKEN` | `apiAuth.existingSecret` |
+
+All three are read from the environment (a Kubernetes Secret injected via
+`secretKeyRef`), never from the ConfigMap. All three are redacted or absent
+from startup logs.
 
 ## Server hardening
 
@@ -109,12 +139,14 @@ absence lets a single idle connection hold a goroutine open indefinitely.
 
 Stated plainly, because a security section that lists only strengths is not one.
 
-**The API is unauthenticated and unencrypted.** Anyone who can reach the port
-can read operational metadata about your inference fleet: workload names, model
-names, namespaces, queue depths, latencies, replica counts. That is not a
-credential, but it is reconnaissance, and in some organisations model names are
-themselves confidential. Network-level restriction is the only control. Enable
-the chart's NetworkPolicy, or put an authenticating proxy in front, or both.
+**The API can be authenticated but not encrypted.** With `api_auth.enabled: true`
+and a sufficiently strong token, data endpoints require a correct Bearer token.
+They are still unencrypted: anyone who can observe traffic on the network
+can read both the token and the data. Put TLS termination in front — an
+ingress controller or a service mesh sidecar — before exposing the API outside
+the cluster. Even inside the cluster, prefer a NetworkPolicy that limits which
+namespaces can reach IFA's port. Operational metadata (workload names, model
+names, namespaces, queue depths) is not a credential but it is reconnaissance.
 
 **Denial of service against the API.** There is no rate limiting and no request
 quota. `/api/v1/recommendations` runs the rule engine synchronously, so it is the
@@ -135,6 +167,13 @@ its evidence is acting on a guess. This is a large part of why IFA is read-only
 ([ADR 0001](adr/0001-read-only.md)) and why every finding carries the numbers
 behind it.
 
+**No audit log.** IFA does not record who queried it or what was returned.
+
+**No rate limiting.** `/api/v1/recommendations` runs the rule engine
+synchronously on every request. A client that polls it in a tight loop consumes
+meaningful CPU. Restrict who can reach the port or put a rate-limiting proxy in
+front.
+
 **Supply-chain attestation.** The release workflow signs container images by
 immutable digest using Sigstore Cosign keyless OIDC signing and attests a
 Syft-generated SPDX JSON SBOM. The signing identity is
@@ -146,7 +185,6 @@ The `v0.2.0-alpha.1` image predates this change and carries no signature.
 
 Verification: see `scripts/verify-release.sh` and `docs/DEPLOYMENT.md`.
 
-**No audit log.** IFA does not record who queried it.
 
 ## Reporting a vulnerability
 

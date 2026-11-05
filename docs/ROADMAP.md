@@ -29,6 +29,8 @@ the single most important fact on this page.
 | Helm chart, RBAC, NetworkPolicy, security contexts | Integration validated for the default install path; NetworkPolicy itself is rendered and schema-checked, never enforced in CI |
 | Webhook alerting | Integration validated — firing, deduplication, resolution, escalation, severity filtering, retry policy, queue saturation, shutdown drain, restart semantics, Prometheus self-metrics, and Helm Secret wiring all verified in CI |
 | TimescaleDB history | Integration validated — real TimescaleDB 2.14.2-pg16, migration verified, all 28 columns persisted, NULL/zero semantics confirmed, outage and recovery tested, CI job runs on every push |
+| API bearer-token auth | Integration validated — requireAuth middleware, constant-time comparison, health probes unauthenticated, CLI env-var injection, Helm Secret wiring, and kind Kubernetes smoke test all verified in CI |
+| Container signing and SBOM | Implemented — release workflow signs image digests with Sigstore Cosign keyless OIDC; Syft generates SPDX JSON SBOM attested to the image; applies to images published from release tags |
 | Counter-rate and queue-growth rules | Integration validated — exercised through actual collector scrapes in the dynamic kind integration test; see below |
 | Demo and its end-to-end test | Locally validated |
 
