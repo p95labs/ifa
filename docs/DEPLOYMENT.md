@@ -260,13 +260,13 @@ Three Prometheus counters track the sink:
 
 | Metric | Meaning |
 |---|---|
-| `ifa_database_written_total` | Snapshots successfully persisted |
-| `ifa_database_failed_total` | Insert errors (timeout, connection refused, etc.) |
+| `ifa_database_writes_total` | Snapshots successfully persisted |
+| `ifa_database_write_failures_total` | Insert errors (timeout, connection refused, etc.) |
 | `ifa_database_dropped_total` | Snapshots discarded because the queue was full |
 
 Non-zero `ifa_database_dropped_total` means the database is too slow or
-unreachable and the queue has filled. Non-zero `ifa_database_failed_total` means
-individual inserts are failing — check database connectivity and logs.
+unreachable and the queue has filled. Non-zero `ifa_database_write_failures_total`
+means individual inserts are failing — check database connectivity and logs.
 
 ### Outage behaviour
 
@@ -277,8 +277,13 @@ When the database becomes unavailable after a successful startup:
    recovers, additional snapshots are dropped.
 3. The **collector, rule engine, and REST API are unaffected** — they read the
    in-memory store, not the database.
-4. When the database recovers, the next insert succeeds and the sink resumes
-   without any restart.
+4. After the database recovers, **restarting IFA** brings up a fresh sink that
+   reconnects and resumes writes. This is what `TestIntegration_Outage_ContainerStop`
+   tests: the container is stopped (writes fail), then started, and a new sink
+   opened against the recovered address succeeds. In-place reconnection of the
+   *running* sink without an IFA restart is expected behaviour but is not yet
+   covered by a test. Snapshots dropped during the outage are permanently lost;
+   IFA does not replay them.
 
 Historical snapshots written before the outage remain in the database. Snapshots
 that were dropped during the outage are permanently lost; IFA does not replay
