@@ -350,7 +350,7 @@ The optional TimescaleDB sink has been validated against a real database
 - Outage tests:
   - `Open()` with an unreachable DSN fails fast; error message does not leak
     the password
-  - Failed writes are counted (`ifa_database_failed_total`), not retried
+  - Failed writes are counted (`ifa_database_write_failures_total`), not retried
   - Queue stays bounded; `Write()` never blocks the collector
   - Container-stop outage confirmed: writes fail during outage, recovery sink on
     the restarted database succeeds
