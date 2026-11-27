@@ -215,7 +215,7 @@ Every endpoint is a GET; the API cannot change anything. Unmeasured values seria
 - **No prompt or response data.** IFA reads Prometheus counters and gauges. Request and response bodies never enter the process.
 - **No outbound connections** beyond the scrape targets you configure, the Kubernetes API, and the alerting webhook if you enable one. No licence check, no telemetry, no update check.
 - **Runs unprivileged**: non-root, read-only root filesystem, all capabilities dropped, seccomp `RuntimeDefault`.
-- **The API is unauthenticated.** This is the significant limitation. It exposes operational metadata about your inference fleet, and the only access control is network-level. Restrict it with a NetworkPolicy or an authenticating proxy.
+- **API Bearer-token authentication is available and opt-in.** Set `api_auth.enabled: true` and supply `IFA_API_TOKEN` through a Kubernetes Secret. Without it the only access control is network-level; restrict with a NetworkPolicy or an authenticating proxy even when the token is set.
 
 [docs/SECURITY_MODEL.md](docs/SECURITY_MODEL.md) has the threat model and the full list of what is not defended against.
 
@@ -232,14 +232,16 @@ Alpha. It works, it is tested, and it is honest about what it has not proven.
 | Rule engine | Implemented, boundary-tested, exercised end to end by the demo and in a real cluster in CI at shipped default thresholds, including suppression |
 | Kubernetes discovery & live GPU E2E | Validated in CI on `kind` (Kubernetes 1.31) and end to end in a single-node GPU-enabled K3s cluster on an NVIDIA L4 (Helm install + vLLM 0.28.0 + official `dcgm-exporter` DaemonSet, firing `IFA-CAP-001`, `IFA-CAP-003`, `IFA-EFF-003`, and `IFA-LAT-001` via the REST API) |
 | Counter-rate / queue-growth rules | Validated via deterministic dynamic multi-scrape integration tests in `kind`, raw timestamped L4 captures (~280–300 preemptions/s), and `IFA-CAP-003` firing live in the GPU K3s run |
-| Webhook alerting | Implemented — transition-based, deduplicated, bounded queue; no live endpoint integration test |
+| Webhook alerting | Integration validated (PR #54) — transition-based, deduplicated, bounded queue; firing, deduplication, resolution, escalation, severity filtering, retry policy, queue saturation, and shutdown drain all verified in CI against an in-process `httptest.Server` |
 | TimescaleDB history | Integration validated (PR #53) — real TimescaleDB 2.14.2-pg16 in CI; all 28 columns round-trip with unmeasured metrics stored as NULL; outage via `docker stop` confirmed: writes fail and are counted, `Write` never blocks, in-memory history and rule engine unaffected; bounded-queue saturation drops counted; startup fails fast when DB is enabled but unreachable |
+| API bearer-token auth | Integration validated (PR #55) — opt-in middleware with constant-time comparison; health probes unauthenticated; CLI reads token from `IFA_API_TOKEN`; Helm Secret wiring; kind Kubernetes smoke test all verified in CI |
+| Container signing and SBOM | Implemented (PR #56) — release workflow signs image digests with Sigstore Cosign keyless OIDC; Syft generates SPDX JSON SBOM attested to the image; applies to images published from release tags |
 
 Live GPU validation covers NVIDIA L4 cards across two providers (JarvisLabs and E2E Networks): vLLM 0.28.0 under KV-cache exhaustion and sustained load, GPU-backed Triton 25.12, NVIDIA's official `dcgm-exporter`, and an end-to-end Helm deployment in a GPU-enabled K3s cluster. What is deliberately *not* claimed: multi-GPU behaviour and per-pod GPU attribution on shared nodes, `IFA-KV-001` reproduced through IFA *inside* Kubernetes (preemption was measured on the L4 outside the cluster, whereas the small `opt-125m` model in the K3s run peaked near 0.23% of the cache), high-saturation Triton rule evaluation, in-place reconnection of the running TimescaleDB sink after the database comes back (recovery is verified by restarting IFA with a new sink, not by the running sink automatically reconnecting), replay of snapshots dropped during a database outage (they are permanently lost by design), and external customer or design-partner validation.
 
 ## Known limitations
 
-- The API is unauthenticated (above).
+- Authentication is opt-in and disabled by default; without it the only access control is network-level (see Security posture above).
 - One instance holds telemetry in memory; running two replicas gives you two independent views, not a shared one. The chart uses `Recreate` for this reason.
 - Percentiles from histogram-backed runtimes are interpolated from bucket boundaries and inherit their resolution. A p95 that lands in vLLM's `+Inf` bucket is reported as the largest finite boundary, which understates it.
 - Without a DCGM endpoint, GPU utilisation and memory are simply not measured, and the rules that need them do not run. IFA reports that rather than substituting a proxy.

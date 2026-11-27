@@ -421,7 +421,7 @@ from someone who runs them and can check the output.
 
 Not close. GPU-backed vLLM validation, GPU-backed Triton validation, live
 Kubernetes E2E validation with real rule firings, dynamic multi-scrape validation
-of the counter-rate rules, and real TimescaleDB integration validation are now
-done. What remains would need, at minimum: authentication on the API; per-workload
-thresholds; per-pod GPU attribution; signed images and an SBOM; and a stable API
-used by somebody other than the author.
+of the counter-rate rules, real TimescaleDB integration validation, API
+bearer-token authentication, container image signing, and SBOM generation are
+now done. What remains would need, at minimum: per-workload thresholds; per-pod
+GPU attribution; and a stable API used by somebody other than the author.
