@@ -91,7 +91,13 @@ jobs:
 
   sign:
     name: Sign image and generate SBOM
-    needs: image
+    # Depend on binaries as well as image: the sign job uploads sbom.spdx.json
+    # via `gh release upload`, which requires the GitHub release to exist first.
+    # The binaries job creates the release via softprops/action-gh-release; if
+    # sign runs before binaries completes, the upload fails with "release not
+    # found".  Declaring the dependency enforces the correct ordering without
+    # changing what either job does.
+    needs: [image, binaries]
     runs-on: ubuntu-latest
     # id-token: write is needed only for Cosign keyless OIDC signing.
     # It is scoped to this job alone; no other job can request an OIDC token.
